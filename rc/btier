@@ -20,7 +20,8 @@ RETVAL=0
 sanitychecks() {
         # Do sanity checks before we start.
         mod=/lib/modules/`uname -r`/kernel/drivers/block/btier.ko
-        if [ ! -f $mod ]; then 
+        mod_dkms=/lib/modules/`uname -r`/updates/dkms/btier.ko
+        if [ ! -f "$mod" -a ! -f "$mod_dkms" ]; then
             log_failure_msg "btier kernel module not found."
             exit 1
         fi

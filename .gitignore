@@ -1,0 +1,12 @@
+kernel/btier/*.o.cmd
+kernel/btier/*.o
+kernel/btier/Module.symvers
+kernel/btier/btier.ko
+kernel/btier/btier.mod.c
+kernel/btier/modules.order
+kernel/btier/.btier.ko.cmd
+kernel/btier/.tmp_versions
+tools/show_block_details
+tools/writetest
+cli/btier_inspect
+cli/btier_setup
