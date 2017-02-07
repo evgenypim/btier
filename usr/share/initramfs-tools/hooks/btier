@@ -1,0 +1,30 @@
+#!/bin/bash
+
+set -eu
+
+MINKVER=4.4.0
+PREREQS="udev"
+
+prereqs() { echo "$PREREQS"; }
+
+case "${1:-}" in
+	prereqs)
+		prereqs
+		exit 0
+		;;
+esac
+
+source /usr/share/initramfs-tools/hook-functions
+
+BTIER_CONFIG=/etc/bttab
+
+copy_exec /sbin/btier_setup /sbin
+copy_exec /sbin/btier_inspect /sbin
+if [ -f "$BTIER_CONFIG" ]; then
+	mkdir -p "${DESTDIR}/etc"
+	cp -pL "$BTIER_CONFIG" "${DESTDIR}/${BTIER_CONFIG}"
+else
+	touch "${DESTDIR}/${BTIER_CONFIG}"
+fi
+
+force_load btier

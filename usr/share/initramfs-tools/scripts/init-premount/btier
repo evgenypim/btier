@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# init-premount script for btier.
+
+PREREQS="udev"
+
+prereqs() { echo "$PREREQS"; }
+
+case "${1:-}" in
+	prereqs)
+		prereqs
+		exit 0
+		;;
+esac
+
+. /scripts/functions
+
+BTIER_CONFIG=/etc/bttab
+
+btier_setup() {
+	local retval=0
+
+	log_begin_msg "Loading btier devices"
+
+	if [ ! -f "$BTIER_CONFIG" ]; then
+		log_warning_msg "$BTIER_CONFIG is not exists"
+		return 0
+	fi
+
+	for tier in $(cat $BTIER_CONFIG | grep -v '^#'); do
+		if ! /sbin/btier_setup -f $tier; then
+			log_failure_msg "Failed to setup tier device : /sbin/btier_setup -f $tier"
+			retval=$((retval+1))
+		fi
+	done
+	
+	if [ "$retval" = "0" ]; then
+		log_success_msg "Loading btier devices completed successfully"
+	else
+		log_failure_msg "Loading btier devices completed with errors"
+	fi
+}
+
+btier_setup
