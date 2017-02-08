@@ -33,10 +33,10 @@ dkms_mkdeb:
 	[ -f $(KERNEL_PKG) ] && cp $(KERNEL_PKG) ./deb
 
 userspace:
+	gzip -c usr/share/man/man1/btier_setup.1 > usr/share/man/man1/btier_setup.1.gz
+	gzip -c usr/share/man/man1/btier_inspect.1 > usr/share/man/man1/btier_inspect.1.gz
 	$(CC) -D_FILE_OFFSET_BITS=64 cli/btier_setup.c -o cli/btier_setup
 	$(CC) -D_FILE_OFFSET_BITS=64 cli/btier_inspect.c -o cli/btier_inspect
-	$(CC) tools/writetest.c -o tools/writetest
-	$(CC) tools/show_block_details.c -o tools/show_block_details
 
 modules:
 	$(MAKE) -Wall -C $(KDIR) M=$(PWD)/kernel/btier modules
@@ -52,8 +52,6 @@ install_userspace:
 	install -D -m 755 -s cli/btier_inspect $(DESTDIR)/sbin/btier_inspect
 	install -D -m 755 etc/init.d/btier $(DESTDIR)/etc/init.d/btier
 	install -D -m 644 etc/bttab_example $(DESTDIR)/etc/bttab_example
-	gzip -c usr/share/man/man1/btier_setup.1 > usr/share/man/man1/btier_setup.1.gz
-	gzip -c usr/share/man/man1/btier_inspect.1 > usr/share/man/man1/btier_inspect.1.gz
 	install -D -m 644 usr/share/man/man1/btier_setup.1.gz $(DESTDIR)/usr/share/man/man1/btier_setup.1.gz
 	install -D -m 644 usr/share/man/man1/btier_inspect.1.gz $(DESTDIR)/usr/share/man/man1/btier_inspect.1.gz
 
