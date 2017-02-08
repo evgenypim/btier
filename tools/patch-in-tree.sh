@@ -16,8 +16,8 @@ if [ ! -d ${dest} ]
       echo "Failed to stat ${dest}"
       exit 1
 fi
-make clean
-cp -ar kernel/btier ${dest}
+make -C ../kernel/btier clean
+cp -ar ../kernel/btier ${dest}
 cp in-tree/Makefile ${dest}/btier
 cp in-tree/Kconfig  ${dest}/btier
 cd $1
