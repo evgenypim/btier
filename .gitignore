@@ -7,7 +7,8 @@ kernel/btier/modules.order
 kernel/btier/.btier.ko.cmd
 kernel/btier/.tmp_versions
 tools/show_block_details
-deb/*.deb
 tools/writetest
 cli/btier_inspect
 cli/btier_setup
+usr/share/man/man1/btier_inspect.1.gz
+usr/share/man/man1/btier_setup.1.gz
