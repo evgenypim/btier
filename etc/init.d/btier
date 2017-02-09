@@ -11,7 +11,7 @@
 # Description:
 ### END INIT INFO
 
-# update-rc.d btier stop 90 0 6 .
+# update-rc.d btier start 70 0 6 .
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 TS=/sbin/btier_setup

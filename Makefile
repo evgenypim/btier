@@ -17,15 +17,16 @@ install_userspace:
 	install -D -m 755 -s cli/btier_setup $(DESTDIR)/sbin/btier_setup
 	install -D -m 755 -s cli/btier_inspect $(DESTDIR)/sbin/btier_inspect
 	install -D -m 644 etc/bttab_example $(DESTDIR)/etc/bttab_example
+	install -D -m 644 etc/init.d/btier $(DESTDIR)/etc/init.d/btier
 	install -D -m 644 usr/share/man/man1/btier_setup.1.gz $(DESTDIR)/usr/share/man/man1/btier_setup.1.gz
 	install -D -m 644 usr/share/man/man1/btier_inspect.1.gz $(DESTDIR)/usr/share/man/man1/btier_inspect.1.gz
 
 install_dkms_src:
 	install -d -m 744 $(DESTDIR)/usr/src/btier-$(VERSION)
-	install -m 644 kernel/btier/*.h $(DESTDIR)/usr/src/btier-2.0.1/
-	install -m 644 kernel/btier/*.c $(DESTDIR)/usr/src/btier-2.0.1/
-	install -m 644 kernel/btier/dkms.conf $(DESTDIR)/usr/src/btier-2.0.1/
-	install -m 644 kernel/btier/Makefile $(DESTDIR)/usr/src/btier-2.0.1/
+	install -m 644 kernel/btier/*.h $(DESTDIR)/usr/src/btier-$(VERSION)/
+	install -m 644 kernel/btier/*.c $(DESTDIR)/usr/src/btier-$(VERSION)/
+	install -m 644 kernel/btier/dkms.conf $(DESTDIR)/usr/src/btier-$(VERSION)/
+	install -m 644 kernel/btier/Makefile $(DESTDIR)/usr/src/btier-$(VERSION)/
 	
 
 uninstall_userspace:
