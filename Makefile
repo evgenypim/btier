@@ -21,7 +21,12 @@ install_userspace:
 	install -D -m 644 usr/share/man/man1/btier_inspect.1.gz $(DESTDIR)/usr/share/man/man1/btier_inspect.1.gz
 
 install_dkms_src:
-	install -d -m 744 kernel/btier $(DESTDIR)/usr/src/btier-$(VERSION)
+	install -d -m 744 $(DESTDIR)/usr/src/btier-$(VERSION)
+	install -m 644 kernel/btier/*.h $(DESTDIR)/usr/src/btier-2.0.1/
+	install -m 644 kernel/btier/*.c $(DESTDIR)/usr/src/btier-2.0.1/
+	install -m 644 kernel/btier/dkms.conf $(DESTDIR)/usr/src/btier-2.0.1/
+	install -m 644 kernel/btier/Makefile $(DESTDIR)/usr/src/btier-2.0.1/
+	
 
 uninstall_userspace:
 	rm $(DESTDIR)/sbin/btier_setup
