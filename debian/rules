@@ -1,0 +1,8 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Uncomment this to turn on verbose mode.
+export DH_VERBOSE=1
+
+%:
+	dh $@ --with dkms --update-rcd-params="start 70 0 6 ." -o --no-restart-on-upgrade --no-start 

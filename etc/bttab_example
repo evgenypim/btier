@@ -1,3 +1,4 @@
-# EXAMPLE modify before copy to /etc
+# EXAMPLE of /etc/bttab
+# WARNING!!! INITRD UPDATE IS REQUIRED AFTER MODIFYING BTIER CONFIGS
 #/data/ssd.img:/data/sata.img
 #/dev/sdxx:/dev/sdyy

@@ -1,0 +1,14 @@
+Source: btier
+Section: admin
+Priority: optional
+Maintainer: UNKNOWN <unknown@unknown>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.4
+Homepage: https://sourceforge.net/projects/tier/
+#Vcs-Git: git@github.com:evgenypim/btier.git
+#Vcs-Browser: https://github.com/evgenypim/btier
+
+Package: btier
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: btier creates an automated tiered blockdevice

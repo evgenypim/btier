@@ -12,3 +12,10 @@ cli/btier_inspect
 cli/btier_setup
 usr/share/man/man1/btier_inspect.1.gz
 usr/share/man/man1/btier_setup.1.gz
+debian/btier.debhelper.log
+debian/btier.postinst.debhelper
+debian/btier.postrm.debhelper
+debian/btier.prerm.debhelper
+debian/btier.substvars
+debian/btier
+debian/files

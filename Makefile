@@ -5,6 +5,10 @@ CC := gcc -O2
 all: userspace
 install: install_dkms_src install_userspace
 
+deb:
+	$(MAKE) -f ./debian/rules clean
+	fakeroot $(MAKE) -f ./debian/rules binary
+
 userspace:
 	gzip -c usr/share/man/man1/btier_setup.1 > usr/share/man/man1/btier_setup.1.gz
 	gzip -c usr/share/man/man1/btier_inspect.1 > usr/share/man/man1/btier_inspect.1.gz
@@ -27,7 +31,7 @@ install_dkms_src:
 	install -m 644 kernel/btier/*.c $(DESTDIR)/usr/src/btier-$(VERSION)/
 	install -m 644 kernel/btier/dkms.conf $(DESTDIR)/usr/src/btier-$(VERSION)/
 	install -m 644 kernel/btier/Makefile $(DESTDIR)/usr/src/btier-$(VERSION)/
-	
+
 
 uninstall_userspace:
 	rm $(DESTDIR)/sbin/btier_setup
