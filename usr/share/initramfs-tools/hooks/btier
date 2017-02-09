@@ -28,3 +28,4 @@ else
 fi
 
 force_load btier
+force_load tgr192
