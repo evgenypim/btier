@@ -39,25 +39,10 @@ To build the tier kernel module the kernel sources and C compiler
 The following command should show your kernel sources
 ls /lib/modules/`uname -r`/build/
 
-Download btier from the sourceforge project page.
-Extract the tar file : tar xvzf btier-x.x.x.tar.gz 
-
-cd btier-x.x.x
-make
-
-This should result in something like:
-make -Wall -C /lib/modules/3.8.0-rc3/build SUBDIRS=
-     /usr/src/btier-0.9.9 M=/usr/src/btier-0.9.9 modules
-make[1]: Entering directory `/usr/src/linux-3.8-rc3'
-  CC [M]  /usr/src/btier-0.9.9/btier_main.o
-  LD [M]  /usr/src/btier-0.9.9/btier.o
-  Building modules, stage 2.
-  MODPOST 1 modules
-  CC      /usr/src/btier-0.9.9/btier.mod.o
-  LD [M]  /usr/src/btier-0.9.9/btier.ko
-make[1]: Leaving directory `/usr/src/linux-3.8-rc3'
-gcc -O2 btier_setup.c -o btier_setup 
-gcc -O2 tools/writetest.c -o tools/writetest
+git clone https://github.com/evgenypim/btier
+cd ./btier/
+make deb
+dpkg -i ../btier_2.0.1-1_amd64.deb
 
 * BEFORE USING btier
 btier combines multiple devices to create a btier device.
@@ -82,14 +67,11 @@ crw-rw---- 1 root root 10, 50 2013-01-23 10:21 /dev/tiercontrol
 
 We are now ready to create a btier blockdevice.
 
-btier allows us to use either real blockdevices or files to be part
-of the tier. A simple way to test btier is therefore to create some
-files and use them to create the btier device.
+- /dev/sda - ssd as tier0
+- /dev/sdb - sas as tier1
 
 Example:
-dd if=/dev/zero of=/tmp/ssd.img bs=1M count=100
-dd if=/dev/zero of=/tmp/sas.img bs=1M count=150
-./btier_setup -f /tmp/ssd.img:/tmp/sas.img -c
+./btier_setup -f /dev/sda:/dev/sdb -c
 
 Please note that the first time that the tier device is created we
 use -c to initialize the device. Do _not_ use -c afterwards since
@@ -123,23 +105,23 @@ migrated to a higher or lower tier.
 Another sysfs file that play an important role in migration is:
 cat /sys/block/sdtiera/tier/migration_policy 
    tier               device         max_age hit_collecttime
-      0              ssd.img           86400           43200
-      1              sas.img           86400           43200
+      0              /dev/sda           86400           43200
+      1              /dev/sdb           86400           43200
 
-What this learns us is that tier 0 is a file with the name ssd.img
+What this learns us is that tier 0 is a file with the name /dev/sda
 Blocks that are stored on tier 0 and have been unused for more then
 86400 seconds will be migrated to tier 1. Any block that is moved
 from tier 1 to tier 0 has a grace period of 43200 seconds before it
 is considered for migration back to tier 1.
 
 You can modify the policy like this:
-echo "0              ssd.img           172800           86400" \
+echo "0              /dev/sda           172800           86400" \
       >/sys/block/sdtiera/tier/migration_policy
 
 cat /sys/block/sdtiera/tier/migration_policy 
    tier               device         max_age hit_collecttime
-      0              ssd.img          172800           86400
-      1              sas.img           86400           43200
+      0              /dev/sda          172800           86400
+      1              /dev/sdb           86400           43200
 
 It is also possible to disable migration during peak hours
 since migration will have a performance impact.
@@ -196,8 +178,8 @@ sdtiera         125.81         0.17       297.70       1886    3248620
 You can also see how the underlying devices to tier are used:
 cat /sys/block/sdtiera/tier/device_usage 
    TIER               DEVICE         SIZE MB    ALLOCATED MB   AVERAGE READS  AVERAGE WRITES
-      0              ssd.img             100              95               0             242
-      1              sas.img             150             147               1            8964
+      0              /dev/sda             100              95               0             242
+      1              /dev/sdb             150             147               1            8964
 
 * BTIER DEVICE UUID
 

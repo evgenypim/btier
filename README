@@ -1,20 +1,33 @@
-The easiest way to install btier is to make sure that 
-kernel sources have been installed on the system and
-to simply type : make in the directory where you unpacked
-the btier sources.
+Tiered storage kernel driver for Linux forked from [btier](https://github.com/tsutsu/btier).
+Tested on Ubuntu 14.04 with 4.4.0-62-generic kernel.
+Features:
+ * dkms support
+ * load btier.ko at boot time (rebuild initrd after bttab altering is required)
+ * debian/ubuntu make packages
 
-However it is also possible to patch your kernel sources
-so that they contain btier. In this case 'make menuconfig'
-will show btier as an option under:
-Device drivers ->Block devices
 
-To patch your kernel sources so that you can build btier
-in-tree use patch-in-tree.sh as follows:
+MAKE, INSTALL and CONFIGURE
+	cd ~/src
+	git clone https://github.com/evgenypim/btier
+	cd ./btier/
+	make deb
+	ls ../btier*.deb #=> ../btier_2.0.1-1_amd64.deb
+	dpkg -i ../btier_2.0.1-1_amd64.deb
 
-./patch-in-tree.sh /usr/src/linux-3.8
+	# create tier device with ssd (sda) as tier0 and hdd (sdb) as tier1
+	modprobe btier
+	ls -l /dev/tiercontrol # check if module is loaded
+	btier_setup -f /dev/sda:/dev/sdb -c
+	ls /dev/sdtier* #=> /dev/sdtiera
 
-Change /usr/src/linux-3.8 to the path where your kernel
-sources reside.
+	# make tier available for fstab at boot time
+	echo "/dev/sda:/dev/sdb" >> /etc/bttab
+	update-initramfs -u
 
-To build only the btier_setup cli:
-make clionly
+	# create filesystem and mount
+	mkfs.ext4 /dev/sdtiera
+	mkdir /mnt/tier
+	mount /dev/sdtiera /mnt/tier
+	echo "/dev/sdtiera /mnt/tier ext4 defaults 0 1" >> /etc/fstab
+
+for more information see Documentation/btier.txt
