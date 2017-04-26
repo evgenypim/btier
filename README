@@ -7,6 +7,7 @@ Features:
 
 
 MAKE, INSTALL and CONFIGURE
+	aptitude install build-essential git dkms debhelper
 	cd ~/src
 	git clone https://github.com/evgenypim/btier
 	cd ./btier/
