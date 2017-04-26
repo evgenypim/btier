@@ -28,6 +28,13 @@ btier_setup() {
 	fi
 
 	for tier in $(cat $BTIER_CONFIG | grep -v '^#'); do
+# Need for check if blockdev is present
+		local tmp_tier="${tier}:"
+		while [ -n "$tmp_tier" ]; do
+			local bdev=${tmp_tier%%:*}
+			tmp_tier="${tmp_tier#*:}"
+			wait_for_bdev $bdev
+		done
 		if ! /sbin/btier_setup -f $tier; then
 			log_failure_msg "Failed to setup tier device : /sbin/btier_setup -f $tier"
 			retval=$((retval+1))
@@ -39,6 +46,16 @@ btier_setup() {
 	else
 		log_failure_msg "Loading btier devices completed with errors"
 	fi
+}
+
+wait_for_bdev() {
+	local bdev="$1"
+	for i in 1 2 3; do
+		[ -b "$bdev" ] && return
+		echo waiting 1 second for $bdev...
+		sleep 1
+	done
+	[ -b "$bdev" ]
 }
 
 btier_setup
