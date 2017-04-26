@@ -1,5 +1,13 @@
+btier (2.0.1-2) unstable; urgency=low
+
+  * Bug fixes
+    - DKMS - auto rebuild module for new kernel
+    - Initramfs - waiting for block device become ready
+
+ -- evgenypim <evgeny.pim@gmail.com>  Tue, 25 Apr 2017 07:29:48 +0300
+
 btier (2.0.1-1) unstable; urgency=low
 
   * Initial release
 
- -- UNKNOWN <unknown@unknown> Thu, 02 Feb 2017 17:44:24 +0200
+ -- UNKNOWN <unknown@unknown>  Thu, 02 Feb 2017 17:44:24 +0200
