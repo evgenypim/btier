@@ -527,29 +527,22 @@ static void copy_physical_blockinfo(struct blockinfo *binfo,
 static void update_blocklist(struct tier_device *dev, u64 blocknr,
 			     struct blockinfo *binfo)
 {
-	struct physical_blockinfo *phy_binfo;
+	struct physical_blockinfo phy_binfo;
 	int res;
 
 	if (dev->inerror)
 		return;
 
-	phy_binfo = kzalloc(sizeof(*phy_binfo), GFP_NOFS);
-	if (!phy_binfo) {
-		tiererror(dev, "kzalloc failed");
-		return;
-	}
-
-	res = tier_file_read(dev, 0, phy_binfo, sizeof(*phy_binfo),
+	res = tier_file_read(dev, 0, &phy_binfo, sizeof(phy_binfo),
 			     dev->backdev[0]->startofblocklist +
-				 (blocknr * sizeof(*phy_binfo)));
+				 (blocknr * sizeof(phy_binfo)));
 	if (res != 0)
 		tiererror(dev, "tier_file_read : returned an error");
 
-	if (!same_blockinfo(phy_binfo, binfo)) {
+	if (!same_blockinfo(&phy_binfo, binfo)) {
 		(void)write_blocklist(dev, blocknr, binfo, WD);
 	}
 
-	kfree(phy_binfo);
 }
 
 /* When write_blocklist is called with write_policy set to
@@ -820,8 +813,8 @@ static int copyblock(struct tier_device *dev, struct blockinfo *newdevice,
 static int migrate_up_ifneeded(struct tier_device *dev, struct blockinfo *binfo,
 			       u64 curblock)
 {
+	struct blockinfo orgbinfo;
 	int res = 0;
-	struct blockinfo *orgbinfo;
 	u64 hitcount = 0;
 	u64 avghitcount = 0;
 	u64 avghitcountnexttier = 0;
@@ -834,12 +827,7 @@ static int migrate_up_ifneeded(struct tier_device *dev, struct blockinfo *binfo,
 	if (binfo->device <= 1) /* already on tier0 */
 		return res;
 
-	orgbinfo = kzalloc(sizeof(struct blockinfo), GFP_NOFS);
-	if (!orgbinfo) {
-		tiererror(dev, "alloc failed");
-		return -ENOMEM;
-	}
-	memcpy(orgbinfo, binfo, sizeof(struct blockinfo));
+	memcpy(&orgbinfo, binfo, sizeof(*binfo));
 
 	hitcount = binfo->readcount + binfo->writecount;
 	backdev = dev->backdev[binfo->device - 1];
@@ -868,27 +856,28 @@ static int migrate_up_ifneeded(struct tier_device *dev, struct blockinfo *binfo,
 				binfo->device--;
 		}
 	}
-	if (orgbinfo->device != binfo->device) {
-		res = copyblock(dev, binfo, orgbinfo, curblock);
+
+	if (orgbinfo.device != binfo->device) {
+		res = copyblock(dev, binfo, &orgbinfo, curblock);
 		if (res == 0) {
-			reset_counters_on_migration(dev, orgbinfo);
-			clear_dev_list(dev, orgbinfo);
-			discard_on_real_device(dev, orgbinfo);
+			reset_counters_on_migration(dev, &orgbinfo);
+			clear_dev_list(dev, &orgbinfo);
+			discard_on_real_device(dev, &orgbinfo);
 		} else {
 			/* copyblock failed, restore the old settings */
-			memcpy(binfo, orgbinfo, sizeof(struct blockinfo));
+			memcpy(binfo, &orgbinfo, sizeof(orgbinfo));
 		}
 	}
-	kfree(orgbinfo);
+
 	return res;
 }
 
 static int migrate_down_ifneeded(struct tier_device *dev,
 				 struct blockinfo *binfo, u64 curblock)
 {
+	struct blockinfo orgbinfo;
 	int res = 0;
 	time_t curseconds = get_seconds();
-	struct blockinfo *orgbinfo;
 	u64 hitcount = 0;
 	u64 avghitcount = 0;
 	u64 hysteresis;
@@ -900,12 +889,7 @@ static int migrate_down_ifneeded(struct tier_device *dev,
 	if (binfo->device == 0)
 		return res;
 
-	orgbinfo = kzalloc(sizeof(struct blockinfo), GFP_NOFS);
-	if (!orgbinfo) {
-		tiererror(dev, "alloc failed");
-		return -ENOMEM;
-	}
-	memcpy(orgbinfo, binfo, sizeof(struct blockinfo));
+	memcpy(&orgbinfo, binfo, sizeof(*binfo));
 
 	hitcount = binfo->readcount + binfo->writecount;
 	backdev = dev->backdev[binfo->device - 1];
@@ -921,23 +905,24 @@ static int migrate_down_ifneeded(struct tier_device *dev,
 	else if (hitcount < avghitcount - hysteresis &&
 		 curseconds - binfo->lastused >
 		     dmagic->dtapolicy.hit_collecttime)
-		if (binfo->device < dev->attached_devices - 1)
+		if (binfo->device + 1 < dev->attached_devices)
 			binfo->device++;
 	spin_unlock(&backdev->magic_lock);
+
 	if (binfo->device > dev->attached_devices) {
-		binfo->device = orgbinfo->device;
-	} else if (orgbinfo->device != binfo->device) {
-		res = copyblock(dev, binfo, orgbinfo, curblock);
+		binfo->device = orgbinfo.device;
+	} else if (orgbinfo.device != binfo->device) {
+		res = copyblock(dev, binfo, &orgbinfo, curblock);
 		if (res == 0) {
-			reset_counters_on_migration(dev, orgbinfo);
-			clear_dev_list(dev, orgbinfo);
-			discard_on_real_device(dev, orgbinfo);
+			reset_counters_on_migration(dev, &orgbinfo);
+			clear_dev_list(dev, &orgbinfo);
+			discard_on_real_device(dev, &orgbinfo);
 		} else {
 			/* copyblock failed, restore the old settings */
-			memcpy(binfo, orgbinfo, sizeof(struct blockinfo));
+			memcpy(binfo, &orgbinfo, sizeof(orgbinfo));
 		}
 	}
-	kfree(orgbinfo);
+
 	return res;
 }
 
@@ -1143,11 +1128,12 @@ static void walk_blocklist(struct tier_device *dev)
 
 void do_migrate_direct(struct tier_device *dev)
 {
+	struct blockinfo orgbinfo;
 	struct data_policy *dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
 	u64 blocknr = dev->mgdirect.blocknr;
 	int newdevice = dev->mgdirect.newdevice;
 	int res;
-	struct blockinfo *binfo, *orgbinfo;
+	struct blockinfo *binfo;
 
 	btier_lock(dev);
 	if (!dtapolicy->migration_disabled) {
@@ -1158,8 +1144,8 @@ void do_migrate_direct(struct tier_device *dev)
 			dev->devname);
 	}
 	if (dev->migrate_verbose)
-		pr_info("sysfs request migrate blocknr %llu to %i\n", blocknr,
-			newdevice);
+		pr_info("sysfs request migrate blocknr %llu to device %u\n",
+		        blocknr, newdevice);
 	binfo = get_blockinfo(dev, blocknr, 0);
 	if (!binfo)
 		goto end_error;
@@ -1170,33 +1156,26 @@ void do_migrate_direct(struct tier_device *dev)
 
 	if (binfo->device - 1 == newdevice) {
 		res = -EEXIST;
-		pr_err("do_migrate_direct : failed to migrate block %llu, "
-		       "already on device %i\n", blocknr, newdevice);
+		pr_err("do_migrate_direct : failed to migrate blocknr %llu, "
+		       "already on device %u\n", blocknr, newdevice);
 		goto end_error;
 	}
-	orgbinfo = kzalloc(sizeof(struct blockinfo), GFP_NOFS);
-	if (!orgbinfo) {
-		tiererror(dev, "alloc failed");
-		res = -ENOMEM;
-		goto end_error;
-	}
-	memcpy(orgbinfo, binfo, sizeof(*binfo));
+
+	memcpy(&orgbinfo, binfo, sizeof(*binfo));
 	binfo->device = newdevice + 1;
 
-	res = copyblock(dev, binfo, orgbinfo, blocknr);
+	res = copyblock(dev, binfo, &orgbinfo, blocknr);
 	if (res == 0) {
-		reset_counters_on_migration(dev, orgbinfo);
-		clear_dev_list(dev, orgbinfo);
-		discard_on_real_device(dev, orgbinfo);
+		reset_counters_on_migration(dev, &orgbinfo);
+		clear_dev_list(dev, &orgbinfo);
+		discard_on_real_device(dev, &orgbinfo);
 	} else {
 		/* copyblock failed, restore the old settings */
-		memcpy(binfo, orgbinfo, sizeof(*binfo));
+		memcpy(binfo, &orgbinfo, sizeof(orgbinfo));
 		pr_err("do_migrate_direct : failed to migrate blocknr %llu "
 		       "from device %u to device %u: %d\n",
-		       blocknr, orgbinfo->device - 1,
-		       binfo->device - 1, res);
+		       blocknr, orgbinfo.device - 1, newdevice, res);
 	}
-	kfree(orgbinfo);
 end_error:
 	btier_unlock(dev);
 }
@@ -2174,19 +2153,14 @@ static int migrate_blocklist(struct tier_device *dev, u64 newstartofblocklist,
 static int migrate_data_if_needed(struct tier_device *dev, u64 startofblocklist,
 				  u64 blocklistsize, int changeddevice)
 {
+	struct blockinfo binfo;
 	int res = 0;
 	int cbres = 0;
 	u64 blocks = dev->size >> BLK_SHIFT;
 	u64 curblock;
-	struct blockinfo *binfo;
 	struct blockinfo *orgbinfo;
 
 	pr_info("migrate_data_if_needed\n");
-	binfo = kzalloc(sizeof(struct blockinfo), GFP_NOFS);
-	if (!binfo) {
-		tiererror(dev, "migrate_data_if_needed : alloc failed");
-		return -ENOMEM;
-	}
 	for (curblock = 0; curblock < blocks; curblock++) {
 		/* Do not update the blocks metadata */
 		orgbinfo = get_blockinfo(dev, curblock, 0);
@@ -2204,25 +2178,25 @@ static int migrate_data_if_needed(struct tier_device *dev, u64 startofblocklist,
 		    curblock, orgbinfo->device - 1);
 		if (orgbinfo->offset >= startofblocklist &&
 		    orgbinfo->offset <= startofblocklist + blocklistsize) {
-			memcpy(binfo, orgbinfo, sizeof(struct blockinfo));
+			memcpy(&binfo, orgbinfo, sizeof(struct blockinfo));
 			// Move the block to the device that has grown
-			binfo->device = changeddevice + 1;
+			binfo.device = changeddevice + 1;
 			pr_info("Call copyblock blocknr %llu from device %u to "
 				"device %u\n",
 				curblock, orgbinfo->device - 1,
-				binfo->device - 1);
-			cbres = copyblock(dev, binfo, orgbinfo, curblock);
+				binfo.device - 1);
+			cbres = copyblock(dev, &binfo, orgbinfo, curblock);
 			if (cbres == 0) {
-				/* update blocklist from copy of binfo */
-				write_blocklist(dev, curblock, binfo, WC);
 				reset_counters_on_migration(dev, orgbinfo);
 				clear_dev_list(dev, orgbinfo);
+				/* update blocklist from copy of binfo */
+				(void)write_blocklist(dev, curblock, &binfo, WC);
 			} else {
 				pr_err("migrate_data_if_needed : "
 				       "failed to migrate blocknr %llu "
 				       "from device %u to device %u: %d\n",
 				       curblock, orgbinfo->device - 1,
-				       binfo->device - 1, cbres);
+				       binfo.device - 1, cbres);
 			}
 		}
 		if (!cbres) {
@@ -2230,7 +2204,6 @@ static int migrate_data_if_needed(struct tier_device *dev, u64 startofblocklist,
 			break;
 		}
 	}
-	kfree(binfo);
 	pr_info("migrate_data_if_needed return %u\n", res);
 	return res;
 }
