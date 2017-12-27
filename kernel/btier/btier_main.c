@@ -1120,8 +1120,13 @@ static void walk_blocklist(struct tier_device *dev)
 	} else {
 		dev->migrate_timer.expires = jiffies + msecs_to_jiffies(3000);
 	}
-	if (!dev->stop && !dtapolicy->migration_disabled)
-		add_timer(&dev->migrate_timer);
+	if (!dev->stop && !dtapolicy->migration_disabled) {
+		if (!timer_pending(&dev->migrate_timer))
+			add_timer(&dev->migrate_timer);
+		else
+			mod_timer(&dev->migrate_timer,
+				  dev->migrate_timer.expires);
+	}
 
 	btier_unlock(dev);
 }
