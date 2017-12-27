@@ -141,33 +141,38 @@ static ssize_t tier_attr_attacheddevices_show(struct tier_device *dev,
 static ssize_t tier_attr_migration_enable_store(struct tier_device *dev,
 						const char *buf, size_t s)
 {
-	struct data_policy *dtapolicy;
+	struct backing_device *backdev0 = dev->backdev[0];
+	struct data_policy *dtapolicy = &backdev0->devmagic->dtapolicy;
 
 	if ('0' != buf[0] && '1' != buf[0])
 		return s;
-	spin_lock(&dev->backdev[0]->magic_lock);
-	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
 	if ('1' == buf[0]) {
+		spin_lock(&backdev0->magic_lock);
 		if (dtapolicy->migration_disabled) {
 			dtapolicy->migration_disabled = 0;
 			dev->resumeblockwalk = 0;
+			spin_unlock(&backdev0->magic_lock);
 			if (0 == atomic_read(&dev->migrate)) {
 				atomic_set(&dev->migrate, 1);
 				wake_up(&dev->migrate_event);
 			}
 			pr_info("migration is enabled for %s\n", dev->devname);
+		} else {
+			spin_unlock(&backdev0->magic_lock);
 		}
 	} else {
-		if (!dtapolicy->migration_disabled &&
-		    0 == atomic_read(&dev->migrate)) {
+		spin_lock(&backdev0->magic_lock);
+		if (!dtapolicy->migration_disabled) {
 			dtapolicy->migration_disabled = 1;
+			spin_unlock(&backdev0->magic_lock);
 			if (timer_pending(&dev->migrate_timer))
 				del_timer_sync(&dev->migrate_timer);
-			pr_info("migration is disabled for %s\n", dev->devname);
+			pr_info("migration is disabled for %s\n",
+			        dev->devname);
+		} else {
+			spin_unlock(&backdev0->magic_lock);
 		}
-		dtapolicy->migration_disabled = 1;
 	}
-	spin_unlock(&dev->backdev[0]->magic_lock);
 	return s;
 }
 
@@ -279,7 +284,7 @@ static ssize_t tier_attr_sequential_landing_store(struct tier_device *dev,
 	int landdev;
 	int res;
 	char *cpybuf;
-	struct backing_device *backdev = dev->backdev[0];
+	struct backing_device *backdev0 = dev->backdev[0];
 
 	cpybuf = null_term_buf(buf, s);
 	if (!cpybuf)
@@ -292,9 +297,9 @@ static ssize_t tier_attr_sequential_landing_store(struct tier_device *dev,
 	if (landdev < 0)
 		goto end_error;
 
-	spin_lock(&backdev->magic_lock);
-	backdev->devmagic->dtapolicy.sequential_landing = landdev;
-	spin_unlock(&backdev->magic_lock);
+	spin_lock(&backdev0->magic_lock);
+	backdev0->devmagic->dtapolicy.sequential_landing = landdev;
+	spin_unlock(&backdev0->magic_lock);
 
 	kfree(cpybuf);
 	return s;
@@ -440,7 +445,8 @@ static ssize_t tier_attr_migration_interval_store(struct tier_device *dev,
 	int res;
 	u64 interval;
 	char *cpybuf;
-	struct data_policy *dtapolicy;
+	struct backing_device *backdev0 = dev->backdev[0];
+	struct data_policy *dtapolicy = &backdev0->devmagic->dtapolicy;
 	int curstate;
 
 	cpybuf = null_term_buf(buf, s);
@@ -450,22 +456,28 @@ static ssize_t tier_attr_migration_interval_store(struct tier_device *dev,
 	if (res == 1) {
 		if (interval <= 0)
 			return -ENOMSG;
-		spin_lock(&dev->backdev[0]->magic_lock);
-		dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
+		spin_lock(&backdev0->magic_lock);
 		curstate = dtapolicy->migration_disabled;
 		dtapolicy->migration_disabled = 1;
-		spin_unlock(&dev->backdev[0]->magic_lock);
+		spin_unlock(&backdev0->magic_lock);
+
 		down_write(&dev->qlock);
-		dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
+
+		spin_lock(&backdev0->magic_lock);
 		dtapolicy->migration_interval = interval;
-		if (!dtapolicy->migration_disabled)
+		if (!dtapolicy->migration_disabled) {
+			spin_unlock(&backdev0->magic_lock);
 			mod_timer(&dev->migrate_timer,
 				  jiffies + msecs_to_jiffies(interval * 1000));
+		} else {
+			spin_unlock(&backdev0->magic_lock);
+		}
+
 		up_write(&dev->qlock);
-		spin_lock(&dev->backdev[0]->magic_lock);
-		dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
+
+		spin_lock(&backdev0->magic_lock);
 		dtapolicy->migration_disabled = curstate;
-		spin_unlock(&dev->backdev[0]->magic_lock);
+		spin_unlock(&backdev0->magic_lock);
 	} else
 		s = -ENOMSG;
 	kfree(cpybuf);
@@ -478,8 +490,8 @@ static ssize_t tier_attr_migration_enable_show(struct tier_device *dev,
 	struct data_policy *dtapolicy;
 	int migration_disabled;
 
-	spin_lock(&dev->backdev[0]->magic_lock);
 	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
+	spin_lock(&dev->backdev[0]->magic_lock);
 	migration_disabled = dtapolicy->migration_disabled;
 	spin_unlock(&dev->backdev[0]->magic_lock);
 	return sprintf(buf, "%i\n", !migration_disabled);

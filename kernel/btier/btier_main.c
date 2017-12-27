@@ -1129,19 +1129,25 @@ static void walk_blocklist(struct tier_device *dev)
 void do_migrate_direct(struct tier_device *dev)
 {
 	struct blockinfo orgbinfo;
-	struct data_policy *dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
+	struct backing_device *backdev0 = dev->backdev[0];
+	struct data_policy *dtapolicy = &backdev0->devmagic->dtapolicy;
 	u64 blocknr = dev->mgdirect.blocknr;
 	int newdevice = dev->mgdirect.newdevice;
 	int res;
 	struct blockinfo *binfo;
 
 	btier_lock(dev);
+	spin_lock(&backdev0->magic_lock);
 	if (!dtapolicy->migration_disabled) {
 		dtapolicy->migration_disabled = 1;
-		del_timer_sync(&dev->migrate_timer);
+		spin_unlock(&backdev0->magic_lock);
+		if (timer_pending(&dev->migrate_timer))
+		    del_timer_sync(&dev->migrate_timer);
 		pr_info("migration is disabled for %s due to user controlled "
 			"data migration\n",
 			dev->devname);
+	} else {
+		spin_unlock(&backdev0->magic_lock);
 	}
 	if (dev->migrate_verbose)
 		pr_info("sysfs request migrate blocknr %llu to device %u\n",
@@ -1182,12 +1188,10 @@ end_error:
 
 static void data_migrator(struct work_struct *work)
 {
-	struct tier_device *dev;
-	struct tier_work *mwork = (struct tier_work *)work;
-	struct data_policy *dtapolicy;
+	struct tier_device *dev = ((struct tier_work *)work)->device;
+	struct backing_device *backdev0 = dev->backdev[0];
+	struct data_policy *dtapolicy = &backdev0->devmagic->dtapolicy;
 
-	dev = mwork->device;
-	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
 	while (!dev->stop) {
 		wait_event_interruptible(
 		    dev->migrate_event,
@@ -1211,9 +1215,14 @@ static void data_migrator(struct work_struct *work)
 				pr_info("NORMAL_IO pending: backoff\n");
 			dev->migrate_timer.expires =
 			    jiffies + msecs_to_jiffies(300);
-			if (!dev->stop && !dtapolicy->migration_disabled)
-				mod_timer_pinned(&dev->migrate_timer,
-						 dev->migrate_timer.expires);
+			spin_lock(&backdev0->magic_lock);
+			if (!dev->stop && !dtapolicy->migration_disabled) {
+				spin_unlock(&backdev0->magic_lock);
+				mod_timer(&dev->migrate_timer,
+					  dev->migrate_timer.expires);
+			} else {
+				spin_unlock(&backdev0->magic_lock);
+			}
 			atomic_set(&dev->migrate, 0);
 			continue;
 		}
