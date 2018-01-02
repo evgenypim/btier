@@ -512,6 +512,11 @@ int main(int argc, char *argv[])
 		die_ioctlerr("ioctl TIER_INIT failed\n");
 	for (count = 0; count <= mkoptions.backdev_count; count++) {
 		dtaexists = stat(mkoptions.backdev[count]->datafile, &stdta);
+		if (-1 == dtaexists) {
+			fprintf(stderr, "Failed to stat backend device %s\n",
+				mkoptions.backdev[count]->datafile);
+			exit(-1);
+		}
 		if (S_ISBLK(stdta.st_mode)) {
 			if ((ffd = open(mkoptions.backdev[count]->datafile,
 					mode, 0600)) < 0) {
@@ -542,11 +547,6 @@ int main(int argc, char *argv[])
 		printf("Device size (rnd)              : 0x%llx (%llu)\n",
 		       devsize, devsize);
 		mkoptions.total_device_size += devsize - TIER_DEVICE_PLAYGROUND;
-		if (-1 == dtaexists) {
-			fprintf(stderr, "Failed to stat backend device %s\n",
-				mkoptions.backdev[count]->datafile);
-			exit(-1);
-		}
 		ret = tier_setup(TIER_SET_FD, fd, count);
 		if (0 != ret)
 			die_ioctlerr("ioctl TIER_SET_FD failed\n");

@@ -36,7 +36,6 @@ struct workqueue_struct *btier_wq;
 /*
  * The internal representation of our device.
  */
-static struct tier_device *device = NULL;
 static char *devicenames;
 static struct mutex ioctl_mutex;
 static DEFINE_SPINLOCK(uselock);
@@ -1489,7 +1488,6 @@ static int order_devices(struct tier_device *dev)
 	char *zhash, *uuid;
 	const char *devicename;
 	struct backing_device *backdev;
-	struct block_device *bdev = NULL;
 
 	zhash = kzalloc(TIGER_HASH_LEN, GFP_KERNEL);
 
@@ -1539,14 +1537,6 @@ static int order_devices(struct tier_device *dev)
 			dtapolicy->max_age = TIERMAXAGE;
 		if (0 == dtapolicy->hit_collecttime)
 			dtapolicy->hit_collecttime = TIERHITCOLLECTTIME;
-		bdev = lookup_bdev(backdev->devmagic->fullpathname);
-		if (IS_ERR(bdev)) {
-			backdev->bdev = NULL;
-			pr_info("device %s is a file\n", devicename);
-		} else {
-			backdev->bdev = bdev;
-			pr_info("device %s is a real device\n", devicename);
-		}
 	}
 	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
 	if (dtapolicy->sequential_landing >= dev->attached_devices)
@@ -1852,30 +1842,55 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	struct file *file = NULL;
 	struct block_device *bdev;
 	char *fullname;
+	struct devicemagic *dmagic;
+	ssize_t bw;
+	loff_t pos = 0;
+	mm_segment_t old_fs = get_fs();
 
 	file = fget(fds->fd);
 	if (!file)
 		return error;
 
 	if (!(file->f_mode & FMODE_WRITE)) {
-		return -EPERM;
-	}
-	fullname = as_sprintf("/dev/%s", file->f_path.dentry->d_name.name);
-	if (!fullname)
-		return -ENOMEM;
-	bdev = lookup_bdev(fullname);
-	kfree(fullname);
-	if (IS_ERR(bdev)) {
-		pr_err("btier 2 no longer supports files as backend\n");
-		return -ENOMSG;
+		error = -EPERM;
+		goto end_error;
 	}
 
+	dmagic = kzalloc(sizeof(struct devicemagic), GFP_KERNEL);
+	set_fs(get_ds());
+	bw = vfs_read(file, (char *)dmagic, sizeof(*dmagic), &pos);
+	set_fs(old_fs);
+	if (dmagic->magic != TIER_DEVICE_BIT_MAGIC) {
+	    kfree(dmagic);
+	    error = -EINVAL;
+	    goto end_error;
+	}
+	kfree(dmagic);
+
+	fullname = as_sprintf("/dev/%s", file->f_path.dentry->d_name.name);
+	if (!fullname) {
+		error = -ENOMEM;
+		goto end_error;
+	}
+	bdev = lookup_bdev(fullname);
+	kfree(fullname);
+
+	if (IS_ERR(bdev)) {
+		pr_err("btier 2 no longer supports files as backend\n");
+		error = -ENOTBLK;
+		goto end_error;
+	}
+	backdev->bdev = bdev;
 	backdev->fds = file;
 	error = 0;
 
 	if (file->f_flags & O_SYNC) {
 		/* Store this persistent on unload */
 		file->f_flags ^= O_SYNC;
+	}
+end_error:
+	if (error != 0) {
+	    fput(file);
 	}
 	return error;
 }
@@ -2356,6 +2371,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct tier_device *dev = NULL;
 	struct tier_device *devnew = NULL;
+	struct backing_device *backdev;
 	int current_device_nr = 0;
 	int err = 0;
 	char *dname;
@@ -2378,9 +2394,6 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		devnew = kzalloc(sizeof(struct tier_device), GFP_KERNEL);
 		if (!devnew)
 			break;
-		if (0 == tier_device_count()) {
-			device = devnew;
-		}
 		list_add_tail(&devnew->list, &device_list);
 		devnew->backdev =
 		    kzalloc(sizeof(struct backing_device *) * MAX_BACKING_DEV,
@@ -2397,17 +2410,18 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		if (0 != dev->tier_device_number)
 			break;
-		err = -EFAULT;
-		dev->backdev[dev->attached_devices] =
-		    kzalloc(sizeof(struct backing_device), GFP_KERNEL);
+		backdev = kzalloc(sizeof(struct backing_device), GFP_KERNEL);
 		if (copy_from_user(&fds, (struct fd_s __user *)arg,
 				   sizeof(fds))) {
 			err = -EFAULT;
 			break;
 		}
-		err =
-		    tier_set_fd(dev, &fds, dev->backdev[dev->attached_devices]);
-
+		err = tier_set_fd(dev, &fds, backdev);
+		if (err != 0) {
+			kfree(backdev);
+			break;
+		}
+		dev->backdev[dev->attached_devices] = backdev;
 		dev->attached_devices++;
 		break;
 	case TIER_SET_SECTORSIZE:
@@ -2442,10 +2456,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (copy_from_user(dname, (char __user *)arg, devlen - 1)) {
 			err = -EFAULT;
 		} else {
-			err = tier_device_count();
 			err = del_tier_device(dname);
-			if (0 == err)
-				device = NULL;
 		}
 		kfree(dname);
 		break;
