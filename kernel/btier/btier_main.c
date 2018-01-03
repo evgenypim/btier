@@ -1895,18 +1895,19 @@ end_error:
 	return error;
 }
 
-/* Return the number of devices in nr
-   and return the last tier_device */
-static struct tier_device *device_nr(int *nr)
+/* Return the requested tier_device, use -1 for last */
+static struct tier_device *tier_device_get(int devnr)
 {
 	struct list_head *pos;
 	struct tier_device *ret = NULL;
+	int nr = 0;
 
-	*nr = 0;
 	list_for_each(pos, &device_list)
 	{
 		ret = list_entry(pos, struct tier_device, list);
-		*nr += 1;
+		if (nr == devnr)
+			break;
+		nr++;
 	}
 	return ret;
 }
@@ -2372,7 +2373,6 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct tier_device *dev = NULL;
 	struct tier_device *devnew = NULL;
 	struct backing_device *backdev;
-	int current_device_nr = 0;
 	int err = 0;
 	char *dname;
 	int devlen;
@@ -2383,7 +2383,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	mutex_lock(&ioctl_mutex);
 	if (cmd != TIER_INIT)
-		dev = device_nr(&current_device_nr);
+		dev = tier_device_get(-1);
 	if (!dev && cmd != TIER_INIT) {
 		err = -EBADSLT;
 		goto end_error;
@@ -2439,7 +2439,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (0 == dev->attached_devices) {
 			pr_err("Insufficient parameters entered");
 		} else {
-			dev->tier_device_number = current_device_nr;
+			dev->tier_device_number = tier_device_count();
 			if (0 != (err = order_devices(dev)))
 				break;
 			if (0 == (err = determine_device_size(dev)))
