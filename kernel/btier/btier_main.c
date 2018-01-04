@@ -2443,6 +2443,12 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (0 == (err = determine_device_size(dev)))
 				err = tier_register(dev);
 		}
+
+		if (err != 0 || arg == 0)
+			break;
+		devlen = 1 + strlen(dev->devname);
+		if (copy_to_user((char __user *)arg, dev->devname, devlen))
+			err = -EFAULT;
 		break;
 	case TIER_DEREGISTER:
 		pr_info("TIER_DEREGISTER\n");
