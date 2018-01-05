@@ -243,20 +243,6 @@ static void write_device_magic(struct tier_device *dev, int device)
 	kfree(dmagic);
 }
 
-static void mark_device_clean(struct tier_device *dev, int device)
-{
-	struct backing_device *backdev = dev->backdev[device];
-
-	spin_lock(&backdev->magic_lock);
-	backdev->devmagic->clean = CLEAN;
-	memset(&backdev->devmagic->binfo_journal_new, 0,
-	       sizeof(struct physical_blockinfo));
-	memset(&backdev->devmagic->binfo_journal_old, 0,
-	       sizeof(struct physical_blockinfo));
-	spin_unlock(&backdev->magic_lock);
-	write_device_magic(dev, device);
-}
-
 static int mark_offset_as_used(struct tier_device *dev, int device, u64 offset)
 {
 	u64 boffset;
@@ -617,6 +603,7 @@ static void clean_blocklist_journal(struct tier_device *dev, int device)
 	       sizeof(struct physical_blockinfo));
 	memset(&devmagic->binfo_journal_new, 0,
 	       sizeof(struct physical_blockinfo));
+	devmagic->clean = CLEAN;
 	devmagic->blocknr_journal = 0;
 	spin_unlock(&backdev->magic_lock);
 	write_device_magic(dev, device);
@@ -1494,8 +1481,6 @@ static int order_devices(struct tier_device *dev)
 	/* Allocate and load */
 	for (i = 0; i < dev->attached_devices; i++) {
 		backdev = dev->backdev[i];
-		backdev->devmagic =
-		    kzalloc(sizeof(*backdev->devmagic), GFP_KERNEL);
 		read_device_magic(dev, i, backdev->devmagic);
 		spin_lock_init(&backdev->magic_lock);
 		spin_lock_init(&backdev->dev_alloc_lock);
@@ -1861,11 +1846,11 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	bw = vfs_read(file, (char *)dmagic, sizeof(*dmagic), &pos);
 	set_fs(old_fs);
 	if (dmagic->magic != TIER_DEVICE_BIT_MAGIC) {
-	    kfree(dmagic);
-	    error = -EINVAL;
-	    goto end_error;
+		kfree(dmagic);
+		error = -EINVAL;
+		goto end_error;
 	}
-	kfree(dmagic);
+	backdev->devmagic = dmagic;
 
 	fullname = as_sprintf("/dev/%s", file->f_path.dentry->d_name.name);
 	if (!fullname) {
@@ -1890,7 +1875,7 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	}
 end_error:
 	if (error != 0) {
-	    fput(file);
+		fput(file);
 	}
 	return error;
 }
@@ -1915,6 +1900,9 @@ static struct tier_device *tier_device_get(int devnr)
 static void tier_deregister(struct tier_device *dev)
 {
 	int i;
+
+	list_del(&dev->list);
+
 	if (dev->active) {
 		dev->stop = 1;
 		dev->active = 0;
@@ -1936,7 +1924,6 @@ static void tier_deregister(struct tier_device *dev)
 
 		pr_info("deregister device %s\n", dev->devname);
 		unregister_blkdev(dev->major_num, dev->devname);
-		list_del(&dev->list);
 
 		kfree(dev->managername);
 		kfree(dev->aioname);
@@ -1948,25 +1935,23 @@ static void tier_deregister(struct tier_device *dev)
 		free_blocklock(dev);
 		free_moving_bio(dev);
 
-		for (i = 0; i < dev->attached_devices; i++) {
-			mark_device_clean(dev, i);
-			filp_close(dev->backdev[i]->fds, NULL);
-			if (dev->backdev[i]->bdev)
-				bdput(dev->backdev[i]->bdev);
-			kfree(dev->backdev[i]->devmagic);
-			kfree(dev->backdev[i]);
-		}
-
-		kfree(dev->backdev);
-
 		if (dev->bio_task)
 			mempool_destroy(dev->bio_task);
 		if (dev->bio_meta)
 			mempool_destroy(dev->bio_meta);
-
-		kfree(dev);
-		dev = NULL;
 	}
+
+	for (i = 0; i < dev->attached_devices; i++) {
+		if (dev->stop)
+			clean_blocklist_journal(dev, i);
+		filp_close(dev->backdev[i]->fds, NULL);
+		if (dev->backdev[i]->bdev != NULL)
+			bdput(dev->backdev[i]->bdev);
+		kfree(dev->backdev[i]->devmagic);
+		kfree(dev->backdev[i]);
+	}
+	kfree(dev->backdev);
+	kfree(dev);
 }
 
 static int del_tier_device(char *devicename)
@@ -2402,6 +2387,13 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			kfree(devnew);
 			break;
 		}
+		err = 0;
+		break;
+	case TIER_DESTROY:
+		err = -EBUSY;
+		if (dev->active)
+			break;
+		tier_deregister(dev);
 		err = 0;
 		break;
 	case TIER_SET_FD:

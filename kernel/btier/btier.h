@@ -68,6 +68,7 @@ typedef unsigned long u32;
 #define TIER_SET_DEVSZ 0xFE03
 #define TIER_REGISTER 0xFE04
 #define TIER_DEREGISTER 0xFE05
+#define TIER_DESTROY 0xFE06
 #define TIER_INIT 0xFE07
 #define TIER_BARRIER 0xFE08
 #define TIER_CACHESIZE 0xFE09
