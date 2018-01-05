@@ -1950,7 +1950,6 @@ static void tier_deregister(struct tier_device *dev)
 		kfree(dev->backdev[i]->devmagic);
 		kfree(dev->backdev[i]);
 	}
-	kfree(dev->backdev);
 	kfree(dev);
 }
 
@@ -2385,13 +2384,6 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (devnew == NULL)
 			break;
 		list_add_tail(&devnew->list, &device_list);
-		devnew->backdev =
-		    kzalloc(sizeof(struct backing_device *) * MAX_BACKING_DEV,
-			    GFP_KERNEL);
-		if (devnew->backdev == NULL) {
-			kfree(devnew);
-			break;
-		}
 		err = 0;
 		break;
 	case TIER_DESTROY:

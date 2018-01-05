@@ -292,7 +292,7 @@ struct tier_device {
 
 	u64 nsectors;
 	unsigned int logical_block_size;
-	struct backing_device **backdev;
+	struct backing_device *backdev[MAX_BACKING_DEV];
 	struct block_device *tier_device;
 	u64 size;
 	u64 blocklistsize;
