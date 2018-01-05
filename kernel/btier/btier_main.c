@@ -2367,32 +2367,38 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return -EACCES;
 
 	mutex_lock(&ioctl_mutex);
-	if (cmd != TIER_INIT)
-		dev = tier_device_get(-1);
-	if (!dev && cmd != TIER_INIT) {
-		err = -EBADSLT;
+	mutex_lock(&tier_devices_mutex);
+
+	/* Get last tier device */
+	dev = tier_device_get(-1);
+	if (dev == NULL && cmd != TIER_INIT) {
+		err = -ENXIO;
 		goto end_error;
 	}
 	switch (cmd) {
 	case TIER_INIT:
+		/* Check if a device is being set up already */
+		if (dev != NULL && dev->tier_device_number == 0)
+		    tier_deregister(dev);
 		err = -ENOMEM;
 		devnew = kzalloc(sizeof(struct tier_device), GFP_KERNEL);
-		if (!devnew)
+		if (devnew == NULL)
 			break;
 		list_add_tail(&devnew->list, &device_list);
 		devnew->backdev =
 		    kzalloc(sizeof(struct backing_device *) * MAX_BACKING_DEV,
 			    GFP_KERNEL);
-		if (!devnew->backdev) {
+		if (devnew->backdev == NULL) {
 			kfree(devnew);
 			break;
 		}
 		err = 0;
 		break;
 	case TIER_DESTROY:
-		err = -EBUSY;
-		if (dev->active)
+		if (dev->tier_device_number != 0) {
+			err = -EBUSY;
 			break;
+		}
 		tier_deregister(dev);
 		err = 0;
 		break;
@@ -2456,6 +2462,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		err = dev->ioctl ? dev->ioctl(dev, cmd, arg) : -EINVAL;
 	}
 end_error:
+	mutex_unlock(&tier_devices_mutex);
 	mutex_unlock(&ioctl_mutex);
 	return err;
 }
