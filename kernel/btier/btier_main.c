@@ -23,7 +23,7 @@
 
 #define TRUE 1
 #define FALSE 0
-#define TIER_VERSION "2.1.3"
+#define TIER_VERSION "2.1.4"
 
 MODULE_VERSION(TIER_VERSION);
 MODULE_LICENSE("GPL");
