@@ -1618,7 +1618,7 @@ static void free_blocklock(struct tier_device *dev)
 	dev->block_lock = NULL;
 }
 
-static int tier_register(struct tier_device *dev)
+static int tier_device_register(struct tier_device *dev)
 {
 	int devnr;
 	int ret = 0;
@@ -1651,7 +1651,7 @@ static int tier_register(struct tier_device *dev)
 		  mempool_create_kmalloc_pool(32, sizeof(struct bio_meta))) ||
 	    alloc_blocklock(dev) || alloc_moving_bio(dev) ||
 	    !(q = blk_alloc_queue(GFP_KERNEL))) {
-		pr_err("Memory allocation failed in tier_register \n");
+		pr_err("Memory allocation failed in tier_device_register \n");
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -1897,7 +1897,7 @@ static struct tier_device *tier_device_get(int devnr)
 	return ret;
 }
 
-static void tier_deregister(struct tier_device *dev)
+static void tier_device_destroy(struct tier_device *dev)
 {
 	int i;
 
@@ -1965,7 +1965,7 @@ static int del_tier_device(char *devicename)
 				if (tier->users > 0)
 					res = -EBUSY;
 				else
-					tier_deregister(tier);
+					tier_device_destroy(tier);
 			}
 		}
 	}
@@ -2378,7 +2378,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case TIER_INIT:
 		/* Check if a device is being set up already */
 		if (dev != NULL && dev->tier_device_number == 0)
-		    tier_deregister(dev);
+		    tier_device_destroy(dev);
 		err = -ENOMEM;
 		devnew = kzalloc(sizeof(struct tier_device), GFP_KERNEL);
 		if (devnew == NULL)
@@ -2391,7 +2391,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			err = -EBUSY;
 			break;
 		}
-		tier_deregister(dev);
+		tier_device_destroy(dev);
 		err = 0;
 		break;
 	case TIER_SET_FD:
@@ -2433,7 +2433,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (0 != (err = order_devices(dev)))
 				break;
 			if (0 == (err = determine_device_size(dev)))
-				err = tier_register(dev);
+				err = tier_device_register(dev);
 		}
 
 		if (err != 0 || arg == 0)
@@ -2515,7 +2515,7 @@ static void __exit tier_exit(void)
 		destroy_workqueue(btier_wq);
 
 	list_for_each_entry_safe(tier, next, &device_list, list)
-	    tier_deregister(tier);
+	    tier_device_destroy(tier);
 
 	misc_deregister(&_tier_misc);
 
