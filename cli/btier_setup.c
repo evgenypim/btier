@@ -436,7 +436,6 @@ int get_opts(int argc, char *argv[])
 		       "specified with -f\n");
 		ret = -1;
 	}
-	printf("\n");
 	return ret;
 }
 
