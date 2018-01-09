@@ -1829,7 +1829,7 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	struct file *file = NULL;
 	struct block_device *bdev;
 	char *fullname;
-	struct devicemagic *dmagic;
+	struct devicemagic *dmagic = NULL;
 	ssize_t bw;
 	loff_t pos = 0;
 	mm_segment_t old_fs = get_fs();
@@ -1844,13 +1844,27 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	}
 
 	dmagic = kzalloc(sizeof(struct devicemagic), GFP_KERNEL);
+	if (dmagic == NULL) {
+		error = -ENOMEM;
+		goto end_error;
+	}
 	set_fs(get_ds());
 	bw = vfs_read(file, (char *)dmagic, sizeof(*dmagic), &pos);
 	set_fs(old_fs);
 	if (dmagic->magic != TIER_DEVICE_BIT_MAGIC) {
-		kfree(dmagic);
+		pr_err("device %s has invalid magic\n",
+		       file->f_path.dentry->d_name.name);
 		error = -EINVAL;
 		goto end_error;
+	}
+	if (dev->attached_devices > 0) {
+		if (memcmp(dmagic->uuid, dev->backdev[0]->devmagic->uuid,
+		           UUID_LEN) != 0) {
+			error = -EINVAL;
+			pr_err("device %s UUID does not match\n",
+			       file->f_path.dentry->d_name.name);
+			goto end_error;
+		}
 	}
 	backdev->devmagic = dmagic;
 
@@ -1877,6 +1891,8 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	}
 end_error:
 	if (error != 0) {
+		if (dmagic != NULL)
+			kfree(dmagic);
 		fput(file);
 	}
 	return error;
