@@ -84,7 +84,7 @@ typedef unsigned long u32;
 #define BTIER_MAX_DEVS 26
 #define BTIER_MAX_INFLIGHT 256
 
-#define TIGER_HASH_LEN 24
+#define TIGER_HASH_LEN 32
 #define UUID_LEN 24
 
 #define RANDOM 0x01
@@ -385,7 +385,6 @@ void *as_sprintf(const char *, ...);
 u64 allocated_on_device(struct tier_device *, int);
 void btier_clear_statistics(struct tier_device *dev);
 int migrate_direct(struct tier_device *, u64, int);
-char *tiger_hash(char *, unsigned int);
 void btier_lock(struct tier_device *);
 void btier_unlock(struct tier_device *);
 #endif

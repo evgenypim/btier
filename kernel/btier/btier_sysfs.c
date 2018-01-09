@@ -558,10 +558,10 @@ static ssize_t tier_attr_uuid_show(struct tier_device *dev, char *buf)
 	int res = 0;
 
 	spin_lock(&dev->backdev[0]->magic_lock);
-	memcpy(buf, dev->backdev[0]->devmagic->uuid, TIGER_HASH_LEN);
+	memcpy(buf, dev->backdev[0]->devmagic->uuid, UUID_LEN);
 	spin_unlock(&dev->backdev[0]->magic_lock);
-	buf[TIGER_HASH_LEN] = '\n';
-	res = TIGER_HASH_LEN + 1;
+	buf[UUID_LEN] = '\n';
+	res = UUID_LEN + 1;
 	return res;
 }
 

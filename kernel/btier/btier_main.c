@@ -49,31 +49,23 @@ static int tier_device_count(void)
 	return count;
 }
 
-char *tiger_hash(char *data, unsigned int dlen)
+static int tiger_hash(char *thash, const char *data, unsigned int dlen)
 {
 	struct scatterlist sg;
 	struct hash_desc desc;
-	char *thash;
+	int ret = 0;
 
-	thash = kzalloc(32, GFP_KERNEL);
-	if (!thash)
-		return thash;
 	/* ... set up the scatterlists ... */
 	desc.tfm = crypto_alloc_hash("tgr192", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(desc.tfm)) {
 		pr_warn("unable to allocate crypto_hash\n");
-		goto fail;
+		return -ENOENT;
 	}
 	desc.flags = 0;
 	sg_init_one(&sg, data, dlen);
-	if (crypto_hash_digest(&desc, &sg, dlen, thash))
-		goto fail;
+	ret = crypto_hash_digest(&desc, &sg, dlen, thash);
 	crypto_free_hash(desc.tfm);
-	return thash;
-
-fail:
-	kfree(thash);
-	return NULL;
+	return ret;
 }
 
 /*
@@ -1420,12 +1412,12 @@ static void repair_bitlists(struct tier_device *dev)
 	}
 }
 
-char *uuid_hash(char *data, int hashlen)
+static char *uuid_hash(const char *data, int hashlen)
 {
 	int n;
-	char *ahash = NULL;
+	char *ahash;
 
-	ahash = kzalloc(TIGER_HASH_LEN * 2, GFP_KERNEL);
+	ahash = kzalloc(hashlen * 2 + 1, GFP_KERNEL);
 	if (!ahash)
 		return NULL;
 	for (n = 0; n < hashlen; n++) {
@@ -1434,33 +1426,28 @@ char *uuid_hash(char *data, int hashlen)
 	return ahash;
 }
 
-char *btier_uuid(struct tier_device *dev)
+static char *btier_uuid(struct tier_device *dev)
 {
 	int i, n;
-	char *thash;
-	int hashlen = TIGER_HASH_LEN;
+	int len, hashlen = TIGER_HASH_LEN;
+	char thash[hashlen];
+	char xbuf[hashlen];
 	const char *name;
-	char *xbuf;
 	char *asc;
 
-	xbuf = kzalloc(hashlen, GFP_KERNEL);
-	if (!xbuf)
-		return NULL;
 	for (i = 0; i < dev->attached_devices; i++) {
 		name = dev->backdev[i]->fds->f_path.dentry->d_name.name;
-		thash = tiger_hash((char *)name, strlen(name));
-		if (!thash) {
+		len = strlen(name);
+		if (tiger_hash(thash, name, len) != 0) {
 			/* When tiger is not supported, use a simple UUID
 			 * construction */
-			thash = kzalloc(TIGER_HASH_LEN, GFP_KERNEL);
-			memcpy(thash,
-			       dev->backdev[i]->fds->f_path.dentry->d_name.name,
-			       hashlen);
+			if (len > hashlen)
+				len = hashlen;
+			memcpy(thash, name, len);
 		}
 		for (n = 0; n < hashlen; n++) {
 			xbuf[n] ^= thash[n];
 		}
-		kfree(thash);
 	}
 	for (n = 0; n < hashlen; n += 2) {
 		xbuf[n] ^= jiffies & 0xff;
@@ -1468,7 +1455,6 @@ char *btier_uuid(struct tier_device *dev)
 	}
 
 	asc = uuid_hash(xbuf, hashlen);
-	kfree(xbuf);
 	return asc;
 }
 
@@ -1504,6 +1490,7 @@ static int order_devices(struct tier_device *dev)
 		}
 	}
 
+	/* Generate UUID */
 	uuid = btier_uuid(dev);
 	/* Mark as inuse */
 	for (i = 0; i < dev->attached_devices; i++) {
