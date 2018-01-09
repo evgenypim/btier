@@ -1429,7 +1429,7 @@ char *uuid_hash(char *data, int hashlen)
 	if (!ahash)
 		return NULL;
 	for (n = 0; n < hashlen; n++) {
-		sprintf(&ahash[n * 2], "%02X", data[n]);
+		sprintf(&ahash[n * 2], "%02X)", (unsigned char)data[n]);
 	}
 	return ahash;
 }
