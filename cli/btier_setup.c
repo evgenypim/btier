@@ -255,6 +255,11 @@ int tier_set_fd(int fd, char *datafile, int devicenr)
 		       datafile, soffset, soffset, devsize, devsize,
 		       bitlistsize, bitlistsize);
 		clear_list(ffd, bitlistsize, soffset);
+		memset(&tier_magic, 0, sizeof(tier_magic));
+		tier_magic.magic = TIER_DEVICE_BIT_MAGIC;
+		res = s_pwrite(ffd, &tier_magic, sizeof(tier_magic), 0);
+		if (res != sizeof(tier_magic))
+			die_syserr();
 	} else {
 		res = s_pread(ffd, &tier_magic, sizeof(tier_magic), 0);
 		if (res != sizeof(tier_magic))
@@ -540,6 +545,7 @@ int main(int argc, char *argv[])
 		printf("Device size (rnd)              : 0x%llx (%llu)\n",
 		       devsize, devsize);
 		mkoptions.total_device_size += devsize - TIER_DEVICE_PLAYGROUND;
+
 		ret = tier_setup(TIER_SET_FD, fd, count);
 		if (0 != ret)
 			die_ioctlerr(TIER_SET_FD, fd);
