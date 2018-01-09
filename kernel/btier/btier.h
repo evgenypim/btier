@@ -85,6 +85,7 @@ typedef unsigned long u32;
 #define BTIER_MAX_INFLIGHT 256
 
 #define TIGER_HASH_LEN 24
+#define UUID_LEN 24
 
 #define RANDOM 0x01
 #define SEQUENTIAL 0x02
@@ -188,7 +189,7 @@ struct devicemagic {
 	u64 startofblocklist;
 	char fullpathname[1025];
 	struct data_policy dtapolicy;
-	char uuid[24];
+	char uuid[UUID_LEN];
 } __attribute__((packed));
 
 struct fd_s {

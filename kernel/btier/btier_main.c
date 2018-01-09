@@ -1469,14 +1469,13 @@ char *btier_uuid(struct tier_device *dev)
 
 static int order_devices(struct tier_device *dev)
 {
+	static const char zhash[UUID_LEN];
 	int i;
 	int clean = 1;
 	struct data_policy *dtapolicy;
-	char *zhash, *uuid;
+	char *uuid;
 	const char *devicename;
 	struct backing_device *backdev;
-
-	zhash = kzalloc(TIGER_HASH_LEN, GFP_KERNEL);
 
 	/* Allocate and load */
 	for (i = 0; i < dev->attached_devices; i++) {
@@ -1500,6 +1499,7 @@ static int order_devices(struct tier_device *dev)
 		}
 	}
 
+	uuid = btier_uuid(dev);
 	/* Mark as inuse */
 	for (i = 0; i < dev->attached_devices; i++) {
 		backdev = dev->backdev[i];
@@ -1507,12 +1507,8 @@ static int order_devices(struct tier_device *dev)
 			tier_check(dev, i);
 			clean = 0;
 		}
-		uuid = btier_uuid(dev);
-		if (0 == memcmp(backdev->devmagic->uuid, zhash,
-				TIGER_HASH_LEN))
-			memcpy(backdev->devmagic->uuid, uuid,
-			       TIGER_HASH_LEN);
-		kfree(uuid);
+		if (0 == memcmp(backdev->devmagic->uuid, zhash, UUID_LEN))
+			memcpy(backdev->devmagic->uuid, uuid, UUID_LEN);
 		backdev->devmagic->clean = DIRTY;
 		write_device_magic(dev, i);
 		dtapolicy = &backdev->devmagic->dtapolicy;
@@ -1523,6 +1519,8 @@ static int order_devices(struct tier_device *dev)
 		if (0 == dtapolicy->hit_collecttime)
 			dtapolicy->hit_collecttime = TIERHITCOLLECTTIME;
 	}
+	kfree(uuid);
+
 	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
 	if (dtapolicy->sequential_landing >= dev->attached_devices)
 		dtapolicy->sequential_landing = 0;
@@ -1531,7 +1529,6 @@ static int order_devices(struct tier_device *dev)
 
 	if (!clean)
 		repair_bitlists(dev);
-	kfree(zhash);
 	return 0;
 }
 
