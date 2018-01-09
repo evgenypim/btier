@@ -1462,6 +1462,11 @@ char *btier_uuid(struct tier_device *dev)
 		}
 		kfree(thash);
 	}
+	for (n = 0; n < hashlen; n += 2) {
+		xbuf[n] ^= jiffies & 0xff;
+		xbuf[n + 1] ^= xbuf[n] ^ ((jiffies >> 8) & 0xff);
+	}
+
 	asc = uuid_hash(xbuf, hashlen);
 	kfree(xbuf);
 	return asc;
