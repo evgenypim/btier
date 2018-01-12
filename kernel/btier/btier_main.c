@@ -1421,7 +1421,7 @@ static char *uuid_hash(const char *data, int hashlen)
 	if (!ahash)
 		return NULL;
 	for (n = 0; n < hashlen; n++) {
-		sprintf(&ahash[n * 2], "%02X)", (unsigned char)data[n]);
+		sprintf(&ahash[n * 2], "%02X", (unsigned char)data[n]);
 	}
 	return ahash;
 }
