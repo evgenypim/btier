@@ -317,13 +317,20 @@ end_exit:
 static int tier_file_write(struct tier_device *dev, unsigned int device,
 			   void *buf, size_t len, loff_t pos)
 {
-	ssize_t bw;
-	mm_segment_t old_fs = get_fs();
 	struct backing_device *backdev = dev->backdev[device];
+	ssize_t bw;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
+	mm_segment_t old_fs = get_fs();
+#endif
 
-	set_fs(get_ds());
 	set_debug_info(dev, VFSWRITE);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bw = kernel_write(backdev->fds, buf, len, &pos);
+#else
+	set_fs(get_ds());
 	bw = vfs_write(backdev->fds, buf, len, &pos);
+	set_fs(old_fs);
+#endif
 	clear_debug_info(dev, VFSWRITE);
 
 	/*
@@ -340,7 +347,6 @@ static int tier_file_write(struct tier_device *dev, unsigned int device,
 			    "device %u\n", device);
 	}
 
-	set_fs(old_fs);
 	if (likely(bw == len))
 		return 0;
 	pr_err("Write error on device %s at offset %llu, length %llu\n",
@@ -358,15 +364,20 @@ static int tier_file_read(struct tier_device *dev, unsigned int device,
 			  void *buf, const int len, loff_t pos)
 {
 	struct backing_device *backdev = dev->backdev[device];
-	struct file *file;
+	struct file *file = backdev->fds;
 	ssize_t bw;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
 	mm_segment_t old_fs = get_fs();
+#endif
 
-	file = backdev->fds;
 	set_debug_info(dev, VFSREAD);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bw = kernel_read(file, buf, len, &pos);
+#else
 	set_fs(get_ds());
 	bw = vfs_read(file, buf, len, &pos);
 	set_fs(old_fs);
+#endif
 	clear_debug_info(dev, VFSREAD);
 	if (likely(bw == len))
 		return 0;
@@ -1779,7 +1790,9 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 	struct devicemagic *dmagic = NULL;
 	ssize_t bw;
 	loff_t pos = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
 	mm_segment_t old_fs = get_fs();
+#endif
 
 	file = fget(fds->fd);
 	if (!file)
@@ -1795,9 +1808,13 @@ static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
 		error = -ENOMEM;
 		goto end_error;
 	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bw = kernel_read(file, dmagic, sizeof(*dmagic), &pos);
+#else
 	set_fs(get_ds());
 	bw = vfs_read(file, (char *)dmagic, sizeof(*dmagic), &pos);
 	set_fs(old_fs);
+#endif
 	if (dmagic->magic != TIER_DEVICE_BIT_MAGIC) {
 		pr_err("device %s has invalid magic\n",
 		       file->f_path.dentry->d_name.name);
