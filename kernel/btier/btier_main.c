@@ -22,8 +22,6 @@
 #include "btier_main.h"
 #include <linux/random.h>
 
-#define TRUE 1
-#define FALSE 0
 #define TIER_VERSION "2.1.5"
 
 MODULE_VERSION(TIER_VERSION);
@@ -1646,7 +1644,11 @@ static int tier_device_register(struct tier_device *dev)
 	q->limits.discard_alignment = BLKSIZE;
 	set_bit(QUEUE_FLAG_NONROT, &q->queue_flags);
 	set_bit(QUEUE_FLAG_DISCARD, &q->queue_flags);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+	blk_queue_write_cache(q, true, true);
+#else
 	blk_queue_flush(q, REQ_FLUSH | REQ_FUA);
+#endif
 
 	/*
 	 * Get registered.
