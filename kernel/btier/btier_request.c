@@ -20,7 +20,11 @@ static void tier_submit_bio(struct tier_device *dev, unsigned int device,
 	set_debug_info(dev, BIO);
 
 	bio->bi_iter.bi_sector = start_sector;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bio_set_dev(bio, bdev);
+#else
 	bio->bi_bdev = bdev;
+#endif
 
 	generic_make_request(bio);
 	clear_debug_info(dev, BIO);
@@ -78,7 +82,11 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 		return -EPERM;
 
 	bio_reset(bio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bio_set_dev(bio, bdev);
+#else
 	bio->bi_bdev = bdev;
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
 	bio->bi_opf = rw;
 #else
@@ -412,7 +420,11 @@ static void tier_meta_work(struct work_struct *work)
 			bio_init(bio);
 #endif
 			__bio_clone_fast(bio, parent_bio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+			bio_set_dev(bio, dev->backdev[i]->bdev);
+#else
 			bio->bi_bdev = dev->backdev[i]->bdev;
+#endif
 			/* no need to set bi_end_io and bi_private */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
 			ret |= submit_bio_wait(bio);
