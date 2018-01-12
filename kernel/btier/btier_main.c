@@ -1418,7 +1418,7 @@ static void btier_uuid(char *buf, struct tier_device *dev)
 static int order_devices(struct tier_device *dev)
 {
 	static const char zhash[UUID_LEN];
-	char uuid[UUID_LEN];
+	char uuid[UUID_LEN + 1];
 	int i;
 	int clean = 1;
 	struct data_policy *dtapolicy;
