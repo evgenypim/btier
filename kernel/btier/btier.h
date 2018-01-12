@@ -8,7 +8,6 @@
 #include <linux/atomic.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
-#include <linux/blkdev.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/device.h>
