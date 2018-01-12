@@ -406,7 +406,11 @@ static void tier_meta_work(struct work_struct *work)
 		/* send this zero size bio to every backing device*/
 		set_debug_info(dev, PRESYNC);
 		for (i = 0; i < dev->attached_devices; i++) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+			bio_init(bio, NULL, 0);
+#else
 			bio_init(bio);
+#endif
 			__bio_clone_fast(bio, parent_bio);
 			bio->bi_bdev = dev->backdev[i]->bdev;
 			/* no need to set bi_end_io and bi_private */
@@ -693,7 +697,11 @@ static inline struct bio_task *task_alloc(struct tier_device *dev,
 	bt->iotype = RANDOM;
 
 	bio = &bt->bio;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+	bio_init(bio, NULL, 0);
+#else
 	bio_init(bio);
+#endif
 	__bio_clone_fast(bio, parent_bio);
 	bio->bi_end_io = request_endio;
 	bio->bi_private = bt;
