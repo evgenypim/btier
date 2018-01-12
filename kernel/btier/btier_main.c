@@ -20,6 +20,7 @@
 
 #include "btier.h"
 #include "btier_main.h"
+#include <linux/random.h>
 
 #define TRUE 1
 #define FALSE 0
@@ -47,25 +48,6 @@ static int tier_device_count(void)
 
 	list_for_each(pos, &device_list) { count++; }
 	return count;
-}
-
-static int tiger_hash(char *thash, const char *data, unsigned int dlen)
-{
-	struct scatterlist sg;
-	struct hash_desc desc;
-	int ret = 0;
-
-	/* ... set up the scatterlists ... */
-	desc.tfm = crypto_alloc_hash("tgr192", 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(desc.tfm)) {
-		pr_warn("unable to allocate crypto_hash\n");
-		return -ENOENT;
-	}
-	desc.flags = 0;
-	sg_init_one(&sg, data, dlen);
-	ret = crypto_hash_digest(&desc, &sg, dlen, thash);
-	crypto_free_hash(desc.tfm);
-	return ret;
 }
 
 /*
@@ -1412,59 +1394,36 @@ static void repair_bitlists(struct tier_device *dev)
 	}
 }
 
-static char *uuid_hash(const char *data, int hashlen)
+static void btier_uuid(char *buf, struct tier_device *dev)
 {
-	int n;
-	char *ahash;
-
-	ahash = kzalloc(hashlen * 2 + 1, GFP_KERNEL);
-	if (!ahash)
-		return NULL;
-	for (n = 0; n < hashlen; n++) {
-		sprintf(&ahash[n * 2], "%02X", (unsigned char)data[n]);
-	}
-	return ahash;
-}
-
-static char *btier_uuid(struct tier_device *dev)
-{
-	int i, n;
-	int len, hashlen = TIGER_HASH_LEN;
-	char thash[hashlen];
-	char xbuf[hashlen];
+	unsigned char xbuf[UUID_LEN / 2];
+	int i, n, len;
 	const char *name;
-	char *asc;
+	u32 hash = 5381;
 
+	/* djb2 hash */
 	for (i = 0; i < dev->attached_devices; i++) {
 		name = dev->backdev[i]->fds->f_path.dentry->d_name.name;
 		len = strlen(name);
-		if (tiger_hash(thash, name, len) != 0) {
-			/* When tiger is not supported, use a simple UUID
-			 * construction */
-			if (len > hashlen)
-				len = hashlen;
-			memcpy(thash, name, len);
-		}
-		for (n = 0; n < hashlen; n++) {
-			xbuf[n] ^= thash[n];
+		for (n = 0; n < len; n++) {
+			hash = hash * 33 ^ name[n];
 		}
 	}
-	for (n = 0; n < hashlen; n += 2) {
-		xbuf[n] ^= jiffies & 0xff;
-		xbuf[n + 1] ^= xbuf[n] ^ ((jiffies >> 8) & 0xff);
-	}
+	prandom_seed(hash);
+	prandom_bytes(xbuf, UUID_LEN / 2);
 
-	asc = uuid_hash(xbuf, hashlen);
-	return asc;
+	for (n = 0; n < UUID_LEN / 2; n++) {
+		sprintf(buf + (n * 2), "%02X", xbuf[n]);
+	}
 }
 
 static int order_devices(struct tier_device *dev)
 {
 	static const char zhash[UUID_LEN];
+	char uuid[UUID_LEN];
 	int i;
 	int clean = 1;
 	struct data_policy *dtapolicy;
-	char *uuid;
 	const char *devicename;
 	struct backing_device *backdev;
 
@@ -1491,7 +1450,7 @@ static int order_devices(struct tier_device *dev)
 	}
 
 	/* Generate UUID */
-	uuid = btier_uuid(dev);
+	btier_uuid(uuid, dev);
 	/* Mark as inuse */
 	for (i = 0; i < dev->attached_devices; i++) {
 		backdev = dev->backdev[i];
@@ -1511,7 +1470,6 @@ static int order_devices(struct tier_device *dev)
 		if (0 == dtapolicy->hit_collecttime)
 			dtapolicy->hit_collecttime = TIERHITCOLLECTTIME;
 	}
-	kfree(uuid);
 
 	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
 	if (dtapolicy->sequential_landing >= dev->attached_devices)

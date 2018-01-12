@@ -10,7 +10,6 @@
 #include <linux/blkdev.h>
 #include <linux/blkdev.h>
 #include <linux/completion.h>
-#include <linux/crypto.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -30,7 +29,6 @@
 #include <linux/moduleparam.h>
 #include <linux/mutex.h>
 #include <linux/rwsem.h>
-#include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/sysfs.h>
@@ -84,7 +82,6 @@ typedef unsigned long u32;
 #define BTIER_MAX_DEVS 26
 #define BTIER_MAX_INFLIGHT 256
 
-#define TIGER_HASH_LEN 32
 #define UUID_LEN 24
 
 #define RANDOM 0x01
