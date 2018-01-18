@@ -8,9 +8,7 @@
 #include <linux/atomic.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
-#include <linux/blkdev.h>
 #include <linux/completion.h>
-#include <linux/crypto.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -30,7 +28,6 @@
 #include <linux/moduleparam.h>
 #include <linux/mutex.h>
 #include <linux/rwsem.h>
-#include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/sysfs.h>
@@ -68,6 +65,7 @@ typedef unsigned long u32;
 #define TIER_SET_DEVSZ 0xFE03
 #define TIER_REGISTER 0xFE04
 #define TIER_DEREGISTER 0xFE05
+#define TIER_DESTROY 0xFE06
 #define TIER_INIT 0xFE07
 #define TIER_BARRIER 0xFE08
 #define TIER_CACHESIZE 0xFE09
@@ -83,7 +81,7 @@ typedef unsigned long u32;
 #define BTIER_MAX_DEVS 26
 #define BTIER_MAX_INFLIGHT 256
 
-#define TIGER_HASH_LEN 24
+#define UUID_LEN 24
 
 #define RANDOM 0x01
 #define SEQUENTIAL 0x02
@@ -187,7 +185,7 @@ struct devicemagic {
 	u64 startofblocklist;
 	char fullpathname[1025];
 	struct data_policy dtapolicy;
-	char uuid[24];
+	char uuid[UUID_LEN];
 } __attribute__((packed));
 
 struct fd_s {
@@ -291,12 +289,12 @@ struct tier_device {
 
 	u64 nsectors;
 	unsigned int logical_block_size;
-	struct backing_device **backdev;
+	struct backing_device *backdev[MAX_BACKING_DEV];
 	struct block_device *tier_device;
 	u64 size;
 	u64 blocklistsize;
 	/* block lock for per block meta data*/
-	struct mutex *block_lock;
+	struct rw_semaphore *block_lock;
 	spinlock_t dbg_lock;
 
 	struct gendisk *gd;
@@ -378,14 +376,11 @@ void clear_dev_list(struct tier_device *dev, struct blockinfo *binfo);
 void reset_counters_on_migration(struct tier_device *dev,
 				 struct blockinfo *binfo);
 
-void free_bitlists(struct tier_device *);
 void resize_tier(struct tier_device *);
-int load_bitlists(struct tier_device *);
 void *as_sprintf(const char *, ...);
 u64 allocated_on_device(struct tier_device *, int);
 void btier_clear_statistics(struct tier_device *dev);
 int migrate_direct(struct tier_device *, u64, int);
-char *tiger_hash(char *, unsigned int);
 void btier_lock(struct tier_device *);
 void btier_unlock(struct tier_device *);
 #endif
