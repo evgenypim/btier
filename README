@@ -12,8 +12,8 @@ MAKE, INSTALL and CONFIGURE
 	git clone https://github.com/evgenypim/btier
 	cd ./btier/
 	make deb
-	ls ../btier*.deb #=> ../btier_2.0.1-1_amd64.deb
-	dpkg -i ../btier_2.0.1-1_amd64.deb
+	ls ../btier*.deb #=> ../btier_2.1.6-1_amd64.deb
+	dpkg -i ../btier_2.1.6-1_amd64.deb
 
 	# create tier device with ssd (sda) as tier0 and hdd (sdb) as tier1
 	modprobe btier

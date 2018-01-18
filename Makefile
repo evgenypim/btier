@@ -1,4 +1,4 @@
-VERSION := 2.0.1
+VERSION := 2.1.6
 
 CC := gcc -O2
 
@@ -43,7 +43,7 @@ uninstall_userspace:
 	rm -r $(DESTDIR)/usr/src/btier-$(VERSION)
 
 clean:
-	$(MAKE) -Wall -C kernel/btier modules
+	$(MAKE) -C kernel/btier clean
 	rm -f usr/share/man/man1/btier_inspect.1.gz
 	rm -f usr/share/man/man1/btier_setup.1.gz
 	rm -f cli/btier_setup

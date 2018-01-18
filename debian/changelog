@@ -1,3 +1,11 @@
+btier (2.1.6-1) unstable; urgency=low
+
+  * Merged https://github.com/trisk/btier.git
+   - kernel 4.9 support
+   - debian 9 support
+
+ -- evgenypim <evgeny.pim@gmail.com>  Thu, 18 Jan 2018 12:30:41 +0300
+
 btier (2.0.1-2) unstable; urgency=low
 
   * Bug fixes
