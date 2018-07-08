@@ -31,6 +31,9 @@ install_dkms_src:
 	install -m 644 kernel/btier/*.c $(DESTDIR)/usr/src/btier-$(VERSION)/
 	install -m 644 kernel/btier/dkms.conf $(DESTDIR)/usr/src/btier-$(VERSION)/
 	install -m 644 kernel/btier/Makefile $(DESTDIR)/usr/src/btier-$(VERSION)/
+	install -d -m 744 $(DESTDIR)/usr/src/btier-$(VERSION)/test_lookup_bdev_func
+	install -m 644 kernel/btier/test_lookup_bdev_func/Makefile $(DESTDIR)/usr/src/btier-$(VERSION)/test_lookup_bdev_func/
+	install -m 644 kernel/btier/test_lookup_bdev_func/*.c $(DESTDIR)/usr/src/btier-$(VERSION)/test_lookup_bdev_func/
 
 
 uninstall_userspace:

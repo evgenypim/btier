@@ -3,6 +3,7 @@
 
 #ifdef __KERNEL__
 #define pr_fmt(fmt) "btier: " fmt
+#include "btier_config.h"
 #include "btier_common.h"
 #include <asm/div64.h>
 #include <linux/atomic.h>
@@ -384,5 +385,9 @@ int migrate_direct(struct tier_device *, u64, int);
 void btier_lock(struct tier_device *);
 void btier_unlock(struct tier_device *);
 #endif
+
+#ifdef HAVE_2ARG_LOOKUP_BDEV
+#define lookup_bdev(pathname) lookup_bdev(pathname, 0)
+#endif /* HAVE_2ARG_LOOKUP_BDEV */
 
 #endif /* _BTIER_H_ */
