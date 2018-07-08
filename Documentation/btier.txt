@@ -42,7 +42,7 @@ ls /lib/modules/`uname -r`/build/
 git clone https://github.com/evgenypim/btier
 cd ./btier/
 make deb
-dpkg -i ../btier_2.1.6-1_amd64.deb
+dpkg -i ../btier_2.2.0-1_amd64.deb
 
 * BEFORE USING btier
 btier combines multiple devices to create a btier device.
