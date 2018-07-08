@@ -1259,6 +1259,17 @@ static char *reserve_devicename(unsigned int *devnr)
 	return retname;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
+static void migrate_timer_expired(struct timer_list *t)
+{
+	struct tier_device *dev = from_timer(dev, t, migrate_timer);
+
+	if (0 == atomic_read(&dev->migrate)) {
+		atomic_set(&dev->migrate, 1);
+		wake_up(&dev->migrate_event);
+	}
+}
+#else //LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
 static void migrate_timer_expired(unsigned long q)
 {
 	struct tier_device *dev = (struct tier_device *)q;
@@ -1268,6 +1279,7 @@ static void migrate_timer_expired(unsigned long q)
 		wake_up(&dev->migrate_event);
 	}
 }
+#endif //LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
 
 static void tier_check(struct tier_device *dev, int devicenr)
 {
@@ -1705,9 +1717,13 @@ static int tier_device_register(struct tier_device *dev)
 	INIT_WORK((struct work_struct *)migratework, data_migrator);
 	queue_work(dev->migration_wq, (struct work_struct *)migratework);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
+	timer_setup(&dev->migrate_timer, migrate_timer_expired, 0);
+#else
 	init_timer(&dev->migrate_timer);
 	dev->migrate_timer.data = (unsigned long)dev;
 	dev->migrate_timer.function = migrate_timer_expired;
+#endif
 	dev->migrate_timer.expires =
 	    jiffies + msecs_to_jiffies(dtapolicy->migration_interval * 1000);
 	add_timer(&dev->migrate_timer);
