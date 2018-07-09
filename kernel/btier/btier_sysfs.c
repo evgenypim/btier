@@ -497,6 +497,35 @@ static ssize_t tier_attr_migration_enable_show(struct tier_device *dev,
 	return sprintf(buf, "%i\n", !migration_disabled);
 }
 
+#define copy2buf( str, buf, pos ) do { memcpy(buf + pos, str, sizeof(str)); pos += sizeof(str) - 1; } while(0)
+#define DEBUG_STATE_STR_MAX_LEN 150
+void state2name(int s, char buf[], size_t buflen){
+	size_t m = 1;
+	size_t bufcur = 0;
+	buf[bufcur] = 0;
+	if ( 0 == s ) {
+		copy2buf("|IDLE|", buf, bufcur);
+		return;
+	}
+
+	for( ; m <= DISCARD && bufcur < buflen; m <<= 1){
+		switch(s&m){
+			case 0: break;
+			case BIOREAD: { copy2buf("|BIOREAD|", buf, bufcur); break; }
+			case VFSREAD: { copy2buf("|VFSREAD|", buf, bufcur); break; }
+			case VFSWRITE: { copy2buf("|VFSWRITE|", buf, bufcur); break; }
+			case BIOWRITE: { copy2buf("|BIOWRITE|", buf, bufcur); break; }
+			case BIO: { copy2buf("|BIO|", buf, bufcur); break; }
+			case WAITAIOPENDING: { copy2buf("|WAITAIOPENDING|", buf, bufcur); break; }
+			case PRESYNC: { copy2buf("|PRESYNC|", buf, bufcur); break; }
+			case PREBINFO: { copy2buf("|PREBINFO|", buf, bufcur); break; }
+			case PREALLOCBLOCK: { copy2buf("|PREALLOCBLOCK|", buf, bufcur); break; }
+			case DISCARD: { copy2buf("|DISCARD|", buf, bufcur); break; }
+			default: { copy2buf("|WTF?|", buf, bufcur);  break; }
+		}
+	}
+}
+
 static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 {
 	char *iotype;
@@ -506,42 +535,30 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 	char *discard;
 #ifndef MAX_PERFORMANCE
 	char *debug_state;
-#endif
+	char debug_state_buf[DEBUG_STATE_STR_MAX_LEN];
+	int cur_debug_state;
+#endif //ifndef MAX_PERFORMANCE
 	int res = 0;
 
-	if (atomic_read(&dev->migrate) == MIGRATION_IO)
-		iotype =
-		    as_sprintf("iotype (normal or migration) : migration_io\n");
-	else if (atomic_read(&dev->wqlock))
-		iotype =
-		    as_sprintf("iotype (normal or migration) : normal_io\n");
-	else
-		iotype =
-		    as_sprintf("iotype (normal or migration) : no activity\n");
-	iopending = as_sprintf("async random ios pending     : %i\n",
-			       atomic_read(&dev->aio_pending));
-	if (rwsem_is_locked(&dev->qlock))
-		qlock = as_sprintf("main mutex                   : locked\n");
-	else
-		qlock = as_sprintf("main mutex                   : unlocked\n");
-	if (waitqueue_active(&dev->aio_event))
-		aiowq = as_sprintf("waiting on asynchrounous io  : True\n");
-	else
-		aiowq = as_sprintf("waiting on asynchrounous io  : False\n");
+	int migration_io, normal_io;
+	migration_io = atomic_read(&dev->migrate);
+	normal_io = atomic_read(&dev->wqlock);
+	iotype =     as_sprintf("iotype (migration/normal_io) : m: %d n: %d\n", migration_io, normal_io);
+	iopending =  as_sprintf("async random ios pending     : %i\n", atomic_read(&dev->aio_pending));
+	qlock =      as_sprintf("main mutex                   : %s\n", rwsem_is_locked(&dev->qlock) ? "locked" : "unlocked");
+	aiowq =      as_sprintf("waiting on asynchrounous io  : %s\n", waitqueue_active(&dev->aio_event) ? "True" : "False");
 #ifndef MAX_PERFORMANCE
 	spin_lock(&dev->dbg_lock);
-	if (dev->debug_state & DISCARD)
-		discard = as_sprintf("discard request is pending   : True\n");
-	else
-		discard = as_sprintf("discard request is pending   : False\n");
-	debug_state =
-	    as_sprintf("debug state                  : %i\n", dev->debug_state);
+	cur_debug_state = dev->debug_state;
 	spin_unlock(&dev->dbg_lock);
-	res = sprintf(buf, "%s%s%s%s%s%s", iotype, iopending, qlock, aiowq,
-		      discard, debug_state);
-#else
+
+	discard =    as_sprintf("discard request is pending   : %s\n", (cur_debug_state & DISCARD) ? "True" : "False");
+	state2name(cur_debug_state, debug_state_buf, DEBUG_STATE_STR_MAX_LEN);
+	debug_state =as_sprintf("debug state                  : %i[%s]\n", cur_debug_state, debug_state_buf);
+	res = sprintf(buf, "%s%s%s%s%s%s", iotype, iopending, qlock, aiowq, discard, debug_state);
+#else //ifndef MAX_PERFORMANCE
 	res = sprintf(buf, "%s%s%s%s", iotype, iopending, qlock, aiowq);
-#endif
+#endif //ifndef MAX_PERFORMANCE
 	kfree(iotype);
 	kfree(iopending);
 	kfree(qlock);
@@ -549,7 +566,7 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 #ifndef MAX_PERFORMANCE
 	kfree(discard);
 	kfree(debug_state);
-#endif
+#endif //ifndef MAX_PERFORMANCE
 	return res;
 }
 
