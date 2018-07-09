@@ -1694,7 +1694,7 @@ static int tier_device_register(struct tier_device *dev)
 	dev->gd->fops = &tier_ops;
 	dev->gd->private_data = dev;
 	strcpy(dev->gd->disk_name, dev->devname);
-	set_capacity(dev->gd, dev->nsectors * (dev->logical_block_size >> 9));
+	set_capacity(dev->gd, dev->nsectors * (dev->logical_block_size >> SECTOR_SHIFT));
 	dev->gd->queue = q;
 
 	migratework = kzalloc(sizeof(*migratework), GFP_KERNEL);
@@ -1774,8 +1774,8 @@ static int register_new_device_size(struct tier_device *dev, u64 newdevsize)
 		return ret;
 	}
 
-	blk_queue_max_discard_sectors(dev->rqueue, dev->size >> 9);
-	set_capacity(dev->gd, dev->size >> 9);
+	blk_queue_max_discard_sectors(dev->rqueue, dev->size >> SECTOR_SHIFT);
+	set_capacity(dev->gd, dev->size >> SECTOR_SHIFT);
 	revalidate_disk(dev->gd);
 	/* let user-space know about the new size */
 	kobject_uevent(&disk_to_dev(dev->gd)->kobj, KOBJ_CHANGE);

@@ -42,7 +42,7 @@ unsigned int get_chunksize(struct block_device *bdev, struct bio *bio)
 
 	max_hwsectors = queue_max_hw_sectors(q);
 	max_sectors = queue_max_sectors(q);
-	chunksize = min(max_hwsectors, max_sectors) << 9;
+	chunksize = min(max_hwsectors, max_sectors) << SECTOR_SHIFT;
 
 	bio_for_each_segment(bv, bio, iter)
 	{
@@ -57,7 +57,7 @@ unsigned int get_chunksize(struct block_device *bdev, struct bio *bio)
 	chunksize = min(ret, chunksize);
 	WARN_ON(!chunksize);
 	/* chunksize should be aligned with sectors */
-	WARN_ON(chunksize & ((1 << 9) - 1));
+	WARN_ON(chunksize & ((1 << SECTOR_SHIFT) - 1));
 
 	ret = max_t(int, chunksize, bio_iovec(bio).bv_len);
 
@@ -93,7 +93,7 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 	bio->bi_rw = rw;
 #endif
 	bio->bi_vcnt = BLKSIZE >> PAGE_SHIFT;
-	bio->bi_iter.bi_sector = binfo->offset >> 9;
+	bio->bi_iter.bi_sector = binfo->offset >> SECTOR_SHIFT;
 	bio->bi_iter.bi_size = BLKSIZE;
 	bio->bi_iter.bi_idx = 0;
 	bio->bi_iter.bi_bvec_done = 0;
@@ -117,8 +117,7 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 		}
 
 		start = 0;
-		split =
-		    bio_next_split(bio, cur_chunk >> 9, GFP_NOIO, fs_bio_set);
+		split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, fs_bio_set);
 		if (split == bio) {
 			set_debug_info(dev, BIO);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
@@ -130,7 +129,7 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 			return res;
 		} else {
 			bio_chain(split, bio);
-			start = (binfo->offset + done) >> 9;
+			start = (binfo->offset + done) >> SECTOR_SHIFT;
 			tier_submit_bio(dev, binfo->device - 1, split, start);
 		}
 
@@ -437,7 +436,7 @@ static void tier_meta_work(struct work_struct *work)
 
 	if (bm->discard) {
 		set_debug_info(dev, DISCARD);
-		tier_discard(dev, parent_bio->bi_iter.bi_sector << 9,
+		tier_discard(dev, parent_bio->bi_iter.bi_sector << SECTOR_SHIFT,
 			     parent_bio->bi_iter.bi_size);
 		clear_debug_info(dev, DISCARD);
 	}
@@ -560,7 +559,7 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 	unsigned int device;
 	struct bio *split;
 
-	end_blk = ((bio_end_sector(bio) - 1) << 9) >> BLK_SHIFT;
+	end_blk = ((bio_end_sector(bio) - 1) << SECTOR_SHIFT) >> BLK_SHIFT;
 
 	/* bounds check */
 	if (end_blk >= dev->size >> BLK_SHIFT) {
@@ -569,7 +568,7 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 	}
 
 	while (cur_blk <= end_blk) {
-		offset = bio->bi_iter.bi_sector << 9;
+		offset = bio->bi_iter.bi_sector << SECTOR_SHIFT;
 		cur_blk = offset >> BLK_SHIFT;
 		offset_in_blk = offset - (cur_blk << BLK_SHIFT);
 		size_in_blk = (cur_blk == end_blk) ? bio->bi_iter.bi_size
@@ -645,7 +644,7 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 			/* if no splits, and it's now last blk of bio */
 			if (1 == atomic_read(&bio->__bi_remaining) &&
 			    cur_blk == end_blk && cur_chunk == size_in_blk) {
-				start = (binfo->offset + offset_in_blk) >> 9;
+				start = (binfo->offset + offset_in_blk) >> SECTOR_SHIFT;
 				if (rw)
 				    up_write(dev->block_lock + cur_blk);
 				else
@@ -655,12 +654,10 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 				goto bio_submitted_lastbio;
 			}
 
-			split = bio_next_split(bio, cur_chunk >> 9, GFP_NOIO,
-					       fs_bio_set);
+			split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, fs_bio_set);
 			if (split == bio) {
 				BUG_ON(cur_blk != end_blk);
-				start =
-				    (binfo->offset + offset_in_blk + done) >> 9;
+				start = (binfo->offset + offset_in_blk + done) >> SECTOR_SHIFT;
 				if (rw)
 				    up_write(dev->block_lock + cur_blk);
 				else
@@ -670,8 +667,7 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 				goto bio_submitted_lastbio;
 			} else {
 				bio_chain(split, bio);
-				start =
-				    (binfo->offset + offset_in_blk + done) >> 9;
+				start = (binfo->offset + offset_in_blk + done) >> SECTOR_SHIFT;
 				tier_submit_bio(dev, device, split, start);
 			}
 

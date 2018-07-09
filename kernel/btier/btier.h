@@ -53,12 +53,14 @@ typedef unsigned long u32;
 */
 
 #define BTIER_MAX_SIZE                                                         \
-	1125899906842624ULL /* 1PB for now, although 4PB or higher is possible \
-			       */
-#define BLKSIZE                                                                \
-	1048576      /*Moving smaller blocks then 1M                           \
-		       will lead to fragmentation */
-#define BLK_SHIFT 20 /*Adjust when changing BLKSIZE */
+	1125899906842624ULL /* 1PB for now, although 4PB or higher is possible  */
+
+/* Moving smaller blocks then 1M will lead to fragmentation */
+#define BLK_SHIFT 20 /*Adjust for changing BLKSIZE */
+#define BLKSIZE	(1 << BLK_SHIFT)
+
+#define SECTOR_SHIFT 9
+#define KERNEL_SECTORSIZE (1ULL << SECTOR_SHIFT)
 
 //#define PAGE_SHIFT 12		/*4k page size */
 #define TIER_NAME_SIZE 64 /* Max lenght of the filenames */
@@ -86,7 +88,6 @@ typedef unsigned long u32;
 
 #define RANDOM 0x01
 #define SEQUENTIAL 0x02
-#define KERNEL_SECTORSIZE 512
 #define MAX_BACKING_DEV 24
 /* Tier reserves 2 MB per device for playing data migration games. */
 #define TIER_DEVICE_PLAYGROUND BLKSIZE * 2
@@ -288,7 +289,7 @@ struct tier_device {
 
 	int (*ioctl)(struct tier_device *, int cmd, u64 arg);
 
-	u64 nsectors;
+	sector_t nsectors;
 	unsigned int logical_block_size;
 	struct backing_device *backdev[MAX_BACKING_DEV];
 	struct block_device *tier_device;
