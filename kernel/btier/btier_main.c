@@ -620,7 +620,7 @@ static void recover_journal(struct tier_device *dev, int device)
 	    blocknr);
 }
 
-int sector_divide(u64 size, u32 sector_size)
+sector_t sector_divide(u64 size, u32 sector_size)
 {
 	u32 bit_shift = 0;
 	u32 s = sector_size;
