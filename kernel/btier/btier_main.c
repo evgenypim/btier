@@ -1075,14 +1075,22 @@ static void walk_blocklist(struct tier_device *dev)
 			}
 		}
 		if (NORMAL_IO == atomic_read(&dev->wqlock)) {
-			mincount++;
-			if (mincount > 5 || res) {
+			if(1){ // stop walk_block_list if normal_io
 				dev->resumeblockwalk = curblock;
 				interrupted = 1;
 				if (dev->migrate_verbose)
-					pr_info("walk_block_list interrupted "
-						"by normal io\n");
-				break;
+					 pr_info("walk_block_list interrupted by normal io\n");
+                                break;
+			} else {
+				mincount++;
+				if (mincount > 5 || res) {
+					dev->resumeblockwalk = curblock;
+					interrupted = 1;
+					if (dev->migrate_verbose)
+						pr_info("walk_block_list interrupted "
+							"by normal io\n");
+					break;
+				}
 			}
 		}
 	}
