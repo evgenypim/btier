@@ -757,8 +757,11 @@ static int copyblock(struct tier_device *dev, struct blockinfo *newdevice,
 	allocate_dev(dev, curblock, newdevice, devicenr);
 
 	/* No space on the device to copy to is not an error */
-	if (0 == newdevice->device)
+	if (0 == newdevice->device) {
+		if (dev->migrate_verbose)
+			pr_info("copyblock : blocknr %llu no free blocks left on device %d", curblock, devicenr);
 		return -ENOSPC;
+	}
 
 	/* the actual data moving */
 	res = tier_moving_block(dev, olddevice, newdevice);
