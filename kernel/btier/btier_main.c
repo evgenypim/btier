@@ -1818,7 +1818,7 @@ static loff_t tier_get_size(struct file *file)
 	// * Unfortunately, if we want to do I/O on the device,
 	// * the number of 512-byte sectors has to fit into a sector_t.
 	// *
-	return size >> 9;
+	return size  & ~( ( 1 << SECTOR_SHIFT ) - 1 );
 }
 
 static int tier_set_fd(struct tier_device *dev, struct fd_s *fds,
@@ -2325,7 +2325,7 @@ void resize_tier(struct tier_device *dev)
 {
 	int count;
 	int res = 1;
-	u64 curdevsize = 0;
+	loff_t curdevsize = 0;
 	u64 newbitlistsize = 0;
 	u64 newblocklistsize = 0;
 	u64 newdevsize = 0;
@@ -2336,8 +2336,7 @@ void resize_tier(struct tier_device *dev)
 
 	pr_info("Start device resizing %s 0x%llx (%llu)\n", dev->devname, dev->size, dev->size);
 	for (count = 0; count < dev->attached_devices; count++) {
-		curdevsize =
-		    KERNEL_SECTORSIZE * tier_get_size(dev->backdev[count]->fds);
+		curdevsize = tier_get_size(dev->backdev[count]->fds);
 		curdevsize = round_to_blksize(curdevsize);
 		newbitlistsize = calc_bitlist_size(curdevsize);
 		pr_info("device %u, curdevsize = %llu old = %llu\n", count,
