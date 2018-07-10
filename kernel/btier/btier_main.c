@@ -939,6 +939,7 @@ static void free_bitlists(struct tier_device *dev)
 	int device;
 
 	for (device = 0; device < dev->attached_devices; device++) {
+		pr_info("free_bitlists on %s", dev->backdev[device]->fds->f_path.dentry->d_name.name);
 		if (dev->backdev[device]->bitlist) {
 			vfree(dev->backdev[device]->bitlist);
 			dev->backdev[device]->bitlist = NULL;
@@ -994,10 +995,18 @@ static void free_blocklist(struct tier_device *dev)
 {
 	u64 curblock;
 	u64 blocks = dev->size >> BLK_SHIFT;
+	u64 next_info_print = 1;
+
 	struct backing_device *backdev = dev->backdev[0];
 	if (!backdev->blocklist)
 		return;
+	pr_info("free_blocklist blocks count: %llu", blocks);
 	for (curblock = 0; curblock < blocks; curblock++) {
+		if ( next_info_print & curblock ) {
+			pr_info("processed %llu/%llu", curblock, blocks);
+			next_info_print <<= 1;
+		}
+
 		if (backdev->blocklist[curblock]) {
 			update_blocklist(dev, curblock,
 					 backdev->blocklist[curblock]);
@@ -1485,7 +1494,7 @@ static int order_devices(struct tier_device *dev)
 		write_device_magic(dev, i);
 		dtapolicy = &backdev->devmagic->dtapolicy;
 		devicename = backdev->fds->f_path.dentry->d_name.name;
-		pr_info("device %s registered as tier %u\n", devicename, i);
+		pr_info("device %s tier uuid: %s registered as tier %u\n", devicename, backdev->devmagic->uuid, i);
 		if (0 == dtapolicy->max_age)
 			dtapolicy->max_age = TIERMAXAGE;
 		if (0 == dtapolicy->hit_collecttime)
@@ -1560,7 +1569,7 @@ static void free_moving_bio(struct tier_device *dev)
 
 static int alloc_blocklock(struct tier_device *dev)
 {
-	unsigned int size;
+	size_t size;
 	u64 i, blocks = dev->size >> BLK_SHIFT;
 
 	size = blocks * sizeof(struct rw_semaphore);
@@ -1586,6 +1595,9 @@ static void free_blocklock(struct tier_device *dev)
 	dev->block_lock = NULL;
 }
 
+
+#define MIN_LOGICAL_BLOCK_SIZE 512
+#define MAX_LOGICAL_BLOCK_SIZE 4096
 static int tier_device_register(struct tier_device *dev)
 {
 	int devnr;
@@ -1595,14 +1607,19 @@ static int tier_device_register(struct tier_device *dev)
 	struct data_policy *dtapolicy = &magic->dtapolicy;
 	struct request_queue *q;
 
-	if (dev->logical_block_size < 512 || dev->logical_block_size > 4096 ||
-	    (dev->logical_block_size & (dev->logical_block_size - 1)) != 0)
-		dev->logical_block_size = 512;
+	if (dev->logical_block_size < MIN_LOGICAL_BLOCK_SIZE || dev->logical_block_size > MAX_LOGICAL_BLOCK_SIZE ||
+	    (dev->logical_block_size & (dev->logical_block_size - 1)) != 0) {
+		pr_info("tier_device logical_block_size = %u out of range", dev->logical_block_size);
+		pr_info("set dev->logical_block_size to minimum value %u", MIN_LOGICAL_BLOCK_SIZE);
+		dev->logical_block_size = MIN_LOGICAL_BLOCK_SIZE;
+	}
 	dev->nsectors = sector_divide(dev->size, dev->logical_block_size);
 	dev->size = dev->nsectors * dev->logical_block_size;
+	pr_info("tier_device dev->nsectors = %zu", dev->nsectors);
+	pr_info("tier_device dev->logical_block_size = %u", dev->logical_block_size);
 	if (dev->size > BTIER_MAX_SIZE) {
 		kfree(dev);
-		pr_err("BTIER max supported device size of 2PB is exceeded\n");
+		pr_err("BTIER max supported device size of 2PB is exceeded %llu > %llu\n", dev->size, BTIER_MAX_SIZE);
 		return -ENOMSG;
 	}
 	dev->active = 1;
@@ -1610,7 +1627,7 @@ static int tier_device_register(struct tier_device *dev)
 	if (!dev->devname)
 		return -ENOMEM;
 
-	pr_info("%s size : %llu\n", dev->devname, dev->size);
+	pr_info("%s size : 0x%llx (%llu)\n", dev->devname, dev->size, dev->size);
 	spin_lock_init(&dev->dbg_lock);
 	spin_lock_init(&dev->io_seq_lock);
 
@@ -1899,6 +1916,8 @@ static void tier_device_destroy(struct tier_device *dev)
 {
 	int i;
 
+
+	pr_info("tier_device_destroy: %s\n", dev->devname);
 	list_del(&dev->list);
 
 	if (dev->active) {
@@ -1925,6 +1944,8 @@ static void tier_device_destroy(struct tier_device *dev)
 
 		kfree(dev->managername);
 		kfree(dev->aioname);
+
+		pr_info("release_devicename %s\n", dev->devname);
 		release_devicename(dev->devname);
 
 		tier_sync(dev);
@@ -1939,13 +1960,17 @@ static void tier_device_destroy(struct tier_device *dev)
 			mempool_destroy(dev->bio_meta);
 	}
 
+	pr_info("deattach back devices");
 	for (i = 0; i < dev->attached_devices; i++) {
+		pr_info("deattaching %s", dev->backdev[i]->fds->f_path.dentry->d_name.name);
 		if (dev->stop)
 			clean_blocklist_journal(dev, i);
 		filp_close(dev->backdev[i]->fds, NULL);
 		if (dev->backdev[i]->bdev != NULL)
 			bdput(dev->backdev[i]->bdev);
 		kfree(dev->backdev[i]->devmagic);
+
+		pr_info("kfree backdev[%d]", i);
 		kfree(dev->backdev[i]);
 	}
 	kfree(dev);
@@ -2301,6 +2326,7 @@ void resize_tier(struct tier_device *dev)
 
 	btier_lock(dev);
 
+	pr_info("Start device resizing %s 0x%llx (%llu)\n", dev->devname, dev->size, dev->size);
 	for (count = 0; count < dev->attached_devices; count++) {
 		curdevsize =
 		    KERNEL_SECTORSIZE * tier_get_size(dev->backdev[count]->fds);
@@ -2430,6 +2456,7 @@ static long tier_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			dev->tier_device_number = tier_device_count();
 			if (0 != (err = order_devices(dev)))
 				break;
+			pr_info("tier device count %u\n", dev->attached_devices);
 			if (0 == (err = determine_device_size(dev)))
 				err = tier_device_register(dev);
 		}
@@ -2477,6 +2504,8 @@ static struct miscdevice _tier_misc = {.minor = MISC_DYNAMIC_MINOR,
 static int __init tier_init(void)
 {
 	int r;
+
+	pr_info("btier module init max device size %llub\n", BTIER_MAX_SIZE);
 
 	if (!(btier_wq = alloc_workqueue("kbtier", WQ_MEM_RECLAIM, 0)) ||
 	    tier_request_init())
