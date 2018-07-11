@@ -120,7 +120,7 @@ void btier_lock(struct tier_device *dev)
 
 void btier_unlock(struct tier_device *dev)
 {
-	atomic_set(&dev->migrate, 0);
+	atomic_set(&dev->migrate, NO_MIGRATION);
 	up_write(&dev->qlock);
 }
 
@@ -1190,7 +1190,7 @@ static void data_migrator(struct work_struct *work)
 	while (!dev->stop) {
 		wait_event_interruptible(
 		    dev->migrate_event,
-		    1 == atomic_read(&dev->migrate) || dev->stop ||
+		    MIGRATION_TIMER_EXPIRED == atomic_read(&dev->migrate) || dev->stop ||
 			1 == atomic_read(&dev->mgdirect.direct));
 		if (dev->migrate_verbose)
 			pr_info("data_migrator woke up\n");
@@ -1218,7 +1218,7 @@ static void data_migrator(struct work_struct *work)
 			} else {
 				spin_unlock(&backdev0->magic_lock);
 			}
-			atomic_set(&dev->migrate, 0);
+			atomic_set(&dev->migrate, NO_MIGRATION);
 			continue;
 		}
 		walk_blocklist(dev);
@@ -1285,7 +1285,7 @@ static void migrate_timer_expired(struct timer_list *t)
 	struct tier_device *dev = from_timer(dev, t, migrate_timer);
 
 	if (0 == atomic_read(&dev->migrate)) {
-		atomic_set(&dev->migrate, 1);
+		atomic_set(&dev->migrate, MIGRATION_TIMER_EXPIRED);
 		wake_up(&dev->migrate_event);
 	}
 }
@@ -1295,7 +1295,7 @@ static void migrate_timer_expired(unsigned long q)
 	struct tier_device *dev = (struct tier_device *)q;
 
 	if (0 == atomic_read(&dev->migrate)) {
-		atomic_set(&dev->migrate, 1);
+		atomic_set(&dev->migrate, MIGRATION_TIMER_EXPIRED);
 		wake_up(&dev->migrate_event);
 	}
 }
@@ -1665,8 +1665,8 @@ static int tier_device_register(struct tier_device *dev)
 	dev->migrate_verbose = 0;
 	dev->stop = 0;
 
-	atomic_set(&dev->migrate, 0);
-	atomic_set(&dev->wqlock, 0);
+	atomic_set(&dev->migrate, NO_MIGRATION);
+	atomic_set(&dev->wqlock, NO_IO);
 	atomic_set(&dev->aio_pending, 0);
 	atomic_set(&dev->mgdirect.direct, 0);
 	atomic64_set(&dev->stats.seq_reads, 0);

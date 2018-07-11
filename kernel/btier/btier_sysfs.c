@@ -152,8 +152,8 @@ static ssize_t tier_attr_migration_enable_store(struct tier_device *dev,
 			dtapolicy->migration_disabled = 0;
 			dev->resumeblockwalk = 0;
 			spin_unlock(&backdev0->magic_lock);
-			if (0 == atomic_read(&dev->migrate)) {
-				atomic_set(&dev->migrate, 1);
+			if (NO_MIGRATION == atomic_read(&dev->migrate)) {
+				atomic_set(&dev->migrate, MIGRATION_TIMER_EXPIRED);
 				wake_up(&dev->migrate_event);
 			}
 			pr_info("migration is enabled for %s\n", dev->devname);

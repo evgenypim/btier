@@ -762,7 +762,7 @@ blk_qc_t tier_make_request(struct request_queue *q, struct bio *parent_bio)
 out:
 	bio_io_error(parent_bio);
 end_return:
-	atomic_set(&dev->wqlock, 0);
+	atomic_set(&dev->wqlock, NO_IO);
 	up_read(&dev->qlock);
 	return BLK_QC_T_NONE;
 }

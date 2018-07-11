@@ -92,7 +92,11 @@ typedef unsigned long u32;
 /* Tier reserves 2 MB per device for playing data migration games. */
 #define TIER_DEVICE_PLAYGROUND BLKSIZE * 2
 
+#define NO_IO 0
 #define NORMAL_IO 1
+
+#define NO_MIGRATION 0
+#define MIGRATION_TIMER_EXPIRED 1
 #define MIGRATION_IO 2
 
 #define CLEAN 1
