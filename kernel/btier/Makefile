@@ -17,7 +17,7 @@ modules:
 	$(MAKE) -C $(KDIR) M=$(PWD)  _LOOKUP_BDEV_2_ARG=${_HAVE_LOOKUP_BDEV_2_ARG} modules
 
 install_modules:
-	install -D -m 755 kernel/btier/btier.ko $(DESTDIR)/lib/modules/`uname -r`/kernel/drivers/block/btier.ko
+	install -D -m 755 $(PWD)/btier.ko $(DESTDIR)/lib/modules/`uname -r`/kernel/drivers/block/btier.ko
 
 uninstall_modules:
 	rm $(DESTDIR)/lib/modules/`uname -r`/kernel/drivers/block/btier.ko
