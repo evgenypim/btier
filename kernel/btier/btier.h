@@ -52,6 +52,28 @@ typedef unsigned long u32;
 
 */
 
+// #define VERBOSE_DEBUG
+
+#ifdef VERBOSE_DEBUG
+#define ENTER_FUNC pr_info("Enter %s[%d]", __FUNCTION__, __LINE__)
+#define ENTER_FUNC_(_f_, ...) pr_info("Enter %s[%d]" _f_ , __FUNCTION__, __LINE__, __VA_ARGS__)
+
+#define EXIT_FUNC pr_info("Leave %s[%d]", __FUNCTION__, __LINE__)
+#define EXIT_FUNC_(_f_, ...) pr_info("Leave %s[%d]" _f_, __FUNCTION__, __LINE__, __VA_ARGS__)
+
+#define FUNC_LINE pr_info("Funct %s[%d]", __FUNCTION__, __LINE__)
+
+#else //VERBOSE_DEBUG
+
+#define ENTER_FUNC
+#define ENTER_FUNC_(_f_, ...)
+
+#define EXIT_FUNC
+#define EXIT_FUNC_(_f_, ...)
+
+#define FUNC_LINE
+#endif //VERBOSE_DEBUG
+
 #define BTIER_MAX_SIZE                                                         \
 	1125899906842624ULL /* 1PB for now, although 4PB or higher is possible  */
 
@@ -61,6 +83,9 @@ typedef unsigned long u32;
 
 #define SECTOR_SHIFT 9
 #define KERNEL_SECTORSIZE (1ULL << SECTOR_SHIFT)
+
+#define MIN_LOGICAL_BLOCK_SIZE 512
+#define MAX_LOGICAL_BLOCK_SIZE 4096
 
 //#define PAGE_SHIFT 12		/*4k page size */
 #define TIER_NAME_SIZE 64 /* Max lenght of the filenames */
@@ -154,13 +179,23 @@ enum states {
 };
 #endif
 
-struct data_policy {
+struct physical_data_policy {
 	unsigned int max_age;
 	unsigned int hit_collecttime;
 	unsigned int sequential_landing;
-	int migration_disabled;
+	int migration_enabled;
 	u64 migration_interval;
 };
+
+#ifdef __KERNEL__
+struct data_policy {
+	atomic_t max_age;
+	atomic_t hit_collecttime;
+	atomic_t sequential_landing;
+	atomic_t migration_enabled;
+	atomic64_t migration_interval;
+};
+#endif //__KERNEL__
 
 struct physical_blockinfo {
 	unsigned int device;
@@ -170,18 +205,18 @@ struct physical_blockinfo {
 	unsigned int writecount;
 } __attribute__((packed));
 
-struct devicemagic {
+struct physical_devicemagic {
 	unsigned int magic;
 	unsigned int device;
 	unsigned int clean;
 	u64 blocknr_journal;
 	struct physical_blockinfo binfo_journal_new;
 	struct physical_blockinfo binfo_journal_old;
-	unsigned int average_reads;
-	unsigned int average_writes;
+	unsigned int average_reads_NOT_IN_USE;
+	unsigned int average_writes_NOT_IN_USE;
 	u64 total_reads;
 	u64 total_writes;
-	time_t average_age;
+	time_t average_age_NOT_IN_USE;
 	u64 devicesize;
 	u64 total_device_size;  /* Only valid for tier 0 */
 	u64 total_bitlist_size; /* Only valid for tier 0 */
@@ -190,9 +225,36 @@ struct devicemagic {
 	u64 startofbitlist;
 	u64 startofblocklist;
 	char fullpathname[1025];
-	struct data_policy dtapolicy;
+	struct physical_data_policy dtapolicy;
 	char uuid[UUID_LEN];
 } __attribute__((packed));
+// TODO: FIX struct layout
+
+#ifdef __KERNEL__
+struct devicemagic {
+	unsigned int magic;
+	unsigned int device;
+	unsigned int clean;								//M
+	u64 blocknr_journal;							//M
+	struct physical_blockinfo binfo_journal_new;	//M
+	struct physical_blockinfo binfo_journal_old;	//M
+	atomic_t average_reads_NOT_IN_USE;				//Ignore
+	atomic_t average_writes_NOT_IN_USE;				//Ignore
+	atomic64_t total_reads;
+	atomic64_t total_writes;
+	time_t average_age_NOT_IN_USE;
+	atomic64_t devicesize;
+	u64 total_device_size;  /* Only valid for tier 0 */
+	u64 total_bitlist_size; /* Only valid for tier 0 */
+	u64 bitlistsize;
+	atomic64_t blocklistsize;
+	u64 startofbitlist;
+	atomic64_t startofblocklist;
+	char fullpathname[1025];
+	struct data_policy dtapolicy;
+	char uuid[UUID_LEN];
+};
+#endif //__KERNEL__
 
 struct fd_s {
 	int fd;
@@ -248,6 +310,8 @@ struct bio_meta {
 	unsigned allocate : 1;
 };
 
+#define FREE_LIST_END (-1)
+#define FREE_LIST_ALLOCATED_MARK (-2)
 struct backing_device {
 	struct file *fds;
 	u64 bitlistsize;
@@ -257,12 +321,14 @@ struct backing_device {
 	u64 startofbitlist;
 	u64 startofblocklist;
 	u64 bitbufoffset;
-	u64 free_offset;
-	u64 usedoffset;
+	u64 free_offset_NOT_IN_USE;
+	u64 usedoffset_NOT_IN_USE;
 	unsigned int dirty;
 	struct devicemagic *devmagic;
-	spinlock_t magic_lock;
+	struct rw_semaphore magic_lock;
 	struct blockinfo **blocklist;
+	u64 *free_offset_list;
+	u64 first_free;
 	u8 *bitlist;
 	/* dev_alloc_lock, protects bitlist, usedoffset and free_offset*/
 	spinlock_t dev_alloc_lock;
@@ -389,6 +455,9 @@ void btier_clear_statistics(struct tier_device *dev);
 int migrate_direct(struct tier_device *, u64, int);
 void btier_lock(struct tier_device *);
 void btier_unlock(struct tier_device *);
+
+unsigned int get_average_reads(struct backing_device *);
+unsigned int get_average_writes(struct backing_device *);
 #endif
 
 #ifdef HAVE_2ARG_LOOKUP_BDEV

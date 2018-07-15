@@ -147,12 +147,12 @@ void write_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 			u64 blocklistsize, struct backing_device *bdev)
 {
 	char *block;
-	struct devicemagic magic;
+	struct physical_devicemagic magic;
 	int res;
 
 	block = s_malloc(BLKSIZE);
 	memset(block, 0, BLKSIZE);
-	memset(&magic, 0, sizeof(struct devicemagic));
+	memset(&magic, 0, sizeof(struct physical_devicemagic));
 	magic.magic = TIER_DEVICE_BIT_MAGIC;
 	magic.device = devicenr;
 	magic.total_device_size = total_device_size;
@@ -165,15 +165,15 @@ void write_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 	if (strlen(bdev->datafile) > 1024)
 		exit(-ENAMETOOLONG);
 	memcpy(&magic.fullpathname, bdev->datafile, strlen(bdev->datafile));
-	memcpy(block, &magic, sizeof(struct devicemagic));
+	memcpy(block, &magic, sizeof(struct physical_devicemagic));
 	res = s_pwrite(fd, block, BLKSIZE, 0);
 	if (res != BLKSIZE)
 		die_syserr();
 	free(block);
 
 	fsync(fd);
-	res = s_pread(fd, &magic, sizeof(struct devicemagic), 0);
-	if (res != sizeof(struct devicemagic))
+	res = s_pread(fd, &magic, sizeof(struct physical_devicemagic), 0);
+	if (res != sizeof(struct physical_devicemagic))
 		die_syserr();
 	if (magic.magic != TIER_DEVICE_BIT_MAGIC) {
 		fprintf(stderr, "Datastore %s failed to verify written magic\n",
@@ -209,7 +209,7 @@ int tier_set_fd(int fd, char *datafile, int devicenr)
 	u64 devsize;
 	u64 round;
 	struct stat stbuf;
-	struct devicemagic tier_magic;
+	struct physical_devicemagic tier_magic;
 	u64 soffset = 0;
 	int header_size = TIER_HEADERSIZE;
 

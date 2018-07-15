@@ -286,16 +286,12 @@ struct blockinfo *get_blockinfo(struct tier_device *dev, u64 blocknr,
 			if (updatemeta == TIERREAD) {
 				if (binfo->readcount < MAX_STAT_COUNT) {
 					binfo->readcount++;
-					spin_lock(&backdev->magic_lock);
-					backdev->devmagic->total_reads++;
-					spin_unlock(&backdev->magic_lock);
+					atomic64_inc(&backdev->devmagic->total_reads);
 				}
 			} else {
 				if (binfo->writecount < MAX_STAT_COUNT) {
 					binfo->writecount++;
-					spin_lock(&backdev->magic_lock);
-					backdev->devmagic->total_writes++;
-					spin_unlock(&backdev->magic_lock);
+					atomic64_inc(&backdev->devmagic->total_writes);
 				}
 			}
 
@@ -316,9 +312,7 @@ static int allocate_block(struct tier_device *dev, u64 blocknr,
 
 	/* Sequential writes will go to SAS or SATA */
 	if (bt->iotype == SEQUENTIAL && dev->attached_devices > 1) {
-		spin_lock(&backdev->magic_lock);
-		device = backdev->devmagic->dtapolicy.sequential_landing;
-		spin_unlock(&backdev->magic_lock);
+		device = atomic_read(&backdev->devmagic->dtapolicy.sequential_landing);
 	}
 
 	while (1) {

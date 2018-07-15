@@ -143,35 +143,31 @@ static ssize_t tier_attr_migration_enable_store(struct tier_device *dev,
 {
 	struct backing_device *backdev0 = dev->backdev[0];
 	struct data_policy *dtapolicy = &backdev0->devmagic->dtapolicy;
+	long new_migration_enabled;
+	long orig_migration_enabled = atomic_read(&dtapolicy->migration_enabled);
+	int r = kstrtol(buf, 10, &new_migration_enabled);
 
-	if ('0' != buf[0] && '1' != buf[0])
+	if ( 0 != r || new_migration_enabled < 0) {
+		pr_info("tier_attr_migration_enable_store migration_enabled wrong value %s", buf);
 		return s;
-	if ('1' == buf[0]) {
-		spin_lock(&backdev0->magic_lock);
-		if (dtapolicy->migration_disabled) {
-			dtapolicy->migration_disabled = 0;
+	}
+
+	atomic_set(&dtapolicy->migration_enabled, new_migration_enabled);
+	if (new_migration_enabled) {
+		if (!orig_migration_enabled) {
 			dev->resumeblockwalk = 0;
-			spin_unlock(&backdev0->magic_lock);
 			if (NO_MIGRATION == atomic_read(&dev->migrate)) {
 				atomic_set(&dev->migrate, MIGRATION_TIMER_EXPIRED);
 				wake_up(&dev->migrate_event);
 			}
-			pr_info("migration is enabled for %s\n", dev->devname);
-		} else {
-			spin_unlock(&backdev0->magic_lock);
 		}
+		pr_info("migration is enabled for %s with timeout %lus\n", dev->devname, new_migration_enabled);
 	} else {
-		spin_lock(&backdev0->magic_lock);
-		if (!dtapolicy->migration_disabled) {
-			dtapolicy->migration_disabled = 1;
-			spin_unlock(&backdev0->magic_lock);
+		if (orig_migration_enabled) {
 			if (timer_pending(&dev->migrate_timer))
 				del_timer_sync(&dev->migrate_timer);
-			pr_info("migration is disabled for %s\n",
-			        dev->devname);
-		} else {
-			spin_unlock(&backdev0->magic_lock);
 		}
+		pr_info("migration is disabled for %s\n", dev->devname);
 	}
 	return s;
 }
@@ -297,9 +293,7 @@ static ssize_t tier_attr_sequential_landing_store(struct tier_device *dev,
 	if (landdev < 0)
 		goto end_error;
 
-	spin_lock(&backdev0->magic_lock);
-	backdev0->devmagic->dtapolicy.sequential_landing = landdev;
-	spin_unlock(&backdev0->magic_lock);
+	atomic_set(&backdev0->devmagic->dtapolicy.sequential_landing, landdev);
 
 	kfree(cpybuf);
 	return s;
@@ -413,8 +407,10 @@ static ssize_t tier_attr_migration_policy_store(struct tier_device *dev,
 	while (a[0] == ' ')
 		a++;
 	p = strchr(a, ' ');
-	cur = kzalloc(p - a, GFP_KERNEL);
-	memcpy(cur, a, p - a + 1);
+	cur = kzalloc(p - a + 1, GFP_KERNEL);
+	if (!cur)
+        goto end_error;
+	memcpy(cur, a, p - a);
 	res = sscanf(cur, "%u", &max_age);
 	kfree(cur);
 	if (res != 1)
@@ -426,11 +422,8 @@ static ssize_t tier_attr_migration_policy_store(struct tier_device *dev,
 	res = sscanf(a, "%u", &hit_collecttime);
 	if (res != 1)
 		goto end_error;
-	spin_lock(&dev->backdev[devicenr]->magic_lock);
-	dev->backdev[devicenr]->devmagic->dtapolicy.max_age = max_age;
-	dev->backdev[devicenr]->devmagic->dtapolicy.hit_collecttime =
-	    hit_collecttime;
-	spin_unlock(&dev->backdev[devicenr]->magic_lock);
+	atomic_set(&dev->backdev[devicenr]->devmagic->dtapolicy.max_age, max_age);
+	atomic_set(&dev->backdev[devicenr]->devmagic->dtapolicy.hit_collecttime, hit_collecttime);
 	kfree(cpybuf);
 	return s;
 
@@ -456,28 +449,21 @@ static ssize_t tier_attr_migration_interval_store(struct tier_device *dev,
 	if (res == 1) {
 		if (interval <= 0)
 			return -ENOMSG;
-		spin_lock(&backdev0->magic_lock);
-		curstate = dtapolicy->migration_disabled;
-		dtapolicy->migration_disabled = 1;
-		spin_unlock(&backdev0->magic_lock);
+
+		curstate = atomic_read(&dtapolicy->migration_enabled);
+		atomic_set(&dtapolicy->migration_enabled, 0);
 
 		down_write(&dev->qlock);
 
-		spin_lock(&backdev0->magic_lock);
-		dtapolicy->migration_interval = interval;
-		if (!dtapolicy->migration_disabled) {
-			spin_unlock(&backdev0->magic_lock);
+		atomic64_set(&dtapolicy->migration_interval, interval);
+		if (atomic_read(&dtapolicy->migration_enabled)) {
 			mod_timer(&dev->migrate_timer,
 				  jiffies + msecs_to_jiffies(interval * 1000));
-		} else {
-			spin_unlock(&backdev0->magic_lock);
 		}
 
 		up_write(&dev->qlock);
 
-		spin_lock(&backdev0->magic_lock);
-		dtapolicy->migration_disabled = curstate;
-		spin_unlock(&backdev0->magic_lock);
+		atomic_set(&dtapolicy->migration_enabled, curstate);
 	} else
 		s = -ENOMSG;
 	kfree(cpybuf);
@@ -488,13 +474,11 @@ static ssize_t tier_attr_migration_enable_show(struct tier_device *dev,
 					       char *buf)
 {
 	struct data_policy *dtapolicy;
-	int migration_disabled;
+	int migration_enabled;
 
 	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
-	spin_lock(&dev->backdev[0]->magic_lock);
-	migration_disabled = dtapolicy->migration_disabled;
-	spin_unlock(&dev->backdev[0]->magic_lock);
-	return sprintf(buf, "%i\n", !migration_disabled);
+	migration_enabled = atomic_read(&dtapolicy->migration_enabled);
+	return sprintf(buf, "%i\n", migration_enabled);
 }
 
 #define copy2buf( str, buf, pos ) do { memcpy(buf + pos, str, sizeof(str)); pos += sizeof(str) - 1; } while(0)
@@ -533,6 +517,7 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 	char *qlock;
 	char *aiowq;
 	char *discard;
+	char *resumeblockwalk;
 #ifndef MAX_PERFORMANCE
 	char *debug_state;
 	char debug_state_buf[DEBUG_STATE_STR_MAX_LEN];
@@ -547,6 +532,7 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 	iopending =  as_sprintf("async random ios pending     : %i\n", atomic_read(&dev->aio_pending));
 	qlock =      as_sprintf("main mutex                   : %s\n", rwsem_is_locked(&dev->qlock) ? "locked" : "unlocked");
 	aiowq =      as_sprintf("waiting on asynchrounous io  : %s\n", waitqueue_active(&dev->aio_event) ? "True" : "False");
+	resumeblockwalk = as_sprintf("resumeblockwalk              : %llu\n", dev->resumeblockwalk);
 #ifndef MAX_PERFORMANCE
 	spin_lock(&dev->dbg_lock);
 	cur_debug_state = dev->debug_state;
@@ -554,10 +540,10 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 
 	discard =    as_sprintf("discard request is pending   : %s\n", (cur_debug_state & DISCARD) ? "True" : "False");
 	state2name(cur_debug_state, debug_state_buf, DEBUG_STATE_STR_MAX_LEN);
-	debug_state =as_sprintf("debug state                  : %i[%s]\n", cur_debug_state, debug_state_buf);
-	res = sprintf(buf, "%s%s%s%s%s%s", iotype, iopending, qlock, aiowq, discard, debug_state);
+	debug_state =as_sprintf("debug state                  : %i [%s]\n", cur_debug_state, debug_state_buf);
+	res = sprintf(buf, "%s%s%s%s%s%s%s", iotype, iopending, qlock, aiowq, discard, debug_state, resumeblockwalk);
 #else //ifndef MAX_PERFORMANCE
-	res = sprintf(buf, "%s%s%s%s", iotype, iopending, qlock, aiowq);
+	res = sprintf(buf, "%s%s%s%s%s", iotype, iopending, qlock, aiowq, resumeblockwalk);
 #endif //ifndef MAX_PERFORMANCE
 	kfree(iotype);
 	kfree(iopending);
@@ -574,9 +560,7 @@ static ssize_t tier_attr_uuid_show(struct tier_device *dev, char *buf)
 {
 	int res = 0;
 
-	spin_lock(&dev->backdev[0]->magic_lock);
 	memcpy(buf, dev->backdev[0]->devmagic->uuid, UUID_LEN);
-	spin_unlock(&dev->backdev[0]->magic_lock);
 	buf[UUID_LEN] = '\n';
 	res = UUID_LEN + 1;
 	return res;
@@ -634,11 +618,8 @@ static ssize_t tier_attr_sequential_landing_show(struct tier_device *dev,
 {
 	struct backing_device *backdev = dev->backdev[0];
 	int len;
-
-	spin_lock(&backdev->magic_lock);
-	len = sprintf(buf, "%i\n",
-		      backdev->devmagic->dtapolicy.sequential_landing);
-	spin_unlock(&backdev->magic_lock);
+	// TODO FIXME
+	len = sprintf(buf, "%i\n", atomic_read(&backdev->devmagic->dtapolicy.sequential_landing));
 
 	return len;
 }
@@ -658,24 +639,20 @@ static ssize_t tier_attr_migration_policy_show(struct tier_device *dev,
 	int res;
 
 	for (i = 0; i < dev->attached_devices; i++) {
-		spin_lock(&dev->backdev[i]->magic_lock);
 		if (!msg) {
 			msg2 = as_sprintf(
 			    "%7s %20s %15s %15s\n%7u %20s %15u %15u\n", "tier",
 			    "device", "max_age", "hit_collecttime", i,
 			    dev->backdev[i]->fds->f_path.dentry->d_name.name,
-			    dev->backdev[i]->devmagic->dtapolicy.max_age,
-			    dev->backdev[i]
-				->devmagic->dtapolicy.hit_collecttime);
+			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.max_age),
+			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.hit_collecttime));
 		} else {
 			msg2 = as_sprintf(
 			    "%s%7u %20s %15u %15u\n", msg, i,
 			    dev->backdev[i]->fds->f_path.dentry->d_name.name,
-			    dev->backdev[i]->devmagic->dtapolicy.max_age,
-			    dev->backdev[i]
-				->devmagic->dtapolicy.hit_collecttime);
+			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.max_age),
+			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.hit_collecttime));
 		}
-		spin_unlock(&dev->backdev[i]->magic_lock);
 		kfree(msg);
 		msg = msg2;
 	}
@@ -689,11 +666,9 @@ static ssize_t tier_attr_migration_interval_show(struct tier_device *dev,
 {
 	struct data_policy *dtapolicy;
 	u64 migration_interval;
-
-	spin_lock(&dev->backdev[0]->magic_lock);
+	// TODO FIXME
 	dtapolicy = &dev->backdev[0]->devmagic->dtapolicy;
-	migration_interval = dtapolicy->migration_interval;
-	spin_unlock(&dev->backdev[0]->magic_lock);
+	migration_interval = atomic64_read(&dtapolicy->migration_interval);
 	return sprintf(buf, "%llu\n", migration_interval);
 }
 
@@ -702,11 +677,9 @@ static ssize_t tier_attr_numwrites_show(struct tier_device *dev, char *buf)
 	int len;
 
 	len = sprintf(buf, "sequential ");
-	len +=
-	    sprintf_one_var(buf + len, atomic64_read(&dev->stats.seq_writes));
+	len += sprintf_one_var(buf + len, atomic64_read(&dev->stats.seq_writes));
 	len += sprintf(buf + len, ", Random ");
-	len +=
-	    sprintf_one_var(buf + len, atomic64_read(&dev->stats.rand_writes));
+	len += sprintf_one_var(buf + len, atomic64_read(&dev->stats.rand_writes));
 
 	return len;
 }
@@ -718,8 +691,7 @@ static ssize_t tier_attr_numreads_show(struct tier_device *dev, char *buf)
 	len = sprintf(buf, "sequential ");
 	len += sprintf_one_var(buf + len, atomic64_read(&dev->stats.seq_reads));
 	len += sprintf(buf + len, ", Random ");
-	len +=
-	    sprintf_one_var(buf + len, atomic64_read(&dev->stats.rand_reads));
+	len += sprintf_one_var(buf + len, atomic64_read(&dev->stats.rand_reads));
 
 	return len;
 }
@@ -739,9 +711,9 @@ static ssize_t tier_attr_device_usage_show(struct tier_device *dev, char *buf)
 	if (!lines)
 		return -ENOMEM;
 
-	line = as_sprintf("%7s %20s %15s %15s %15s %15s %15s %15s\n", "TIER",
+	line = as_sprintf("%7s %20s %15s %15s %15s %15s %15s %15s %15s\n", "TIER",
 			  "DEVICE", "SIZE MB", "ALLOCATED MB", "AVERAGE READS",
-			  "AVERAGE WRITES", "TOTAL_READS", "TOTAL_WRITES");
+			  "AVERAGE WRITES", "TOTAL_READS", "TOTAL_WRITES", "MAGIC_LOCK");
 	if (!line) {
 		kfree(lines);
 		return -ENOMEM;
@@ -756,20 +728,16 @@ static ssize_t tier_attr_device_usage_show(struct tier_device *dev, char *buf)
 			     dev->backdev[i]->startofdata) >>
 			    BLK_SHIFT;
 
-		spin_lock(&dev->backdev[i]->magic_lock);
-		dev->backdev[i]->devmagic->average_reads = btier_div(
-		    dev->backdev[i]->devmagic->total_reads, devblocks);
-		dev->backdev[i]->devmagic->average_writes = btier_div(
-		    dev->backdev[i]->devmagic->total_writes, devblocks);
 		line = as_sprintf(
-		    "%7u %20s %15llu %15llu %15u %15u %15llu %15llu\n", i,
+		    "%7u %20s %15llu %15llu %15u %15u %15llu %15llu %15s\n", i,
 		    dev->backdev[i]->fds->f_path.dentry->d_name.name, devblocks,
-		    allocated, dev->backdev[i]->devmagic->average_reads,
-		    dev->backdev[i]->devmagic->average_writes,
-		    dev->backdev[i]->devmagic->total_reads,
-		    dev->backdev[i]->devmagic->total_writes);
+		    allocated,
+		    get_average_reads(dev->backdev[i]),
+		    get_average_writes(dev->backdev[i]),
+		    atomic64_read(&dev->backdev[i]->devmagic->total_reads),
+		    atomic64_read(&dev->backdev[i]->devmagic->total_writes),
+		    rwsem_is_locked(&dev->backdev[i]->magic_lock) ? "locked" : "unlocked");
 		lines[i + 1] = line;
-		spin_unlock(&dev->backdev[i]->magic_lock);
 	}
 	msg = as_strarrcat(lines, i + 1);
 	if (!msg) {
