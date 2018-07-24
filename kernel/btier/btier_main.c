@@ -358,7 +358,8 @@ u64 free_backdev_block(struct backing_device *backdev, u64 blocknr) {
 	ENTER_FUNC_(" device: %s blocknr: %llu", backdev->fds->f_path.dentry->d_name.name, blocknr );
 
 	if ( FREE_LIST_ALLOCATED_MARK != backdev->free_offset_list[blocknr] ) {
-		EXIT_FUNC_(" device: %s blocknr: %llu FREE_LIST_ALLOCATED_MARK != backdev->free_offset_list[blocknr]", backdev->fds->f_path.dentry->d_name.name, blocknr );
+		pr_warn("free_backdev_block: device: %s blocknr: %llu backdev->free_offset_list[blocknr]: %lld "
+				"FREE_LIST_ALLOCATED_MARK != backdev->free_offset_list[blocknr]", backdev->fds->f_path.dentry->d_name.name, blocknr , backdev->free_offset_list[blocknr]);
 		return FREE_LIST_END;
 	}
 
@@ -385,11 +386,7 @@ void clear_dev_list(struct tier_device *dev, struct blockinfo *binfo)
 	vfs_fsync_range(backdev->fds, bloffset, bloffset + 1, FSMODE);
 
 	spin_lock(&backdev->dev_alloc_lock);
-	if ( free_backdev_block(backdev, boffset) == boffset ) {
-#ifdef VERBOSE_DEBUG
-		pr_info("clear_dev_list: free_backdev_block success");
-#endif
-	} else {
+	if ( free_backdev_block(backdev, boffset) != boffset ) {
 		pr_info("clear_dev_list: free_backdev_block failed");
 	}
 
