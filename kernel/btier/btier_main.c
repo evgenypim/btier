@@ -336,7 +336,7 @@ static int mark_offset_as_used(struct tier_device *dev, int device, u64 offset)
 	backdev->bitlist[boffset] = allocated;
 	spin_unlock(&backdev->dev_alloc_lock);
 
-	ENTER_FUNC_(" device: %d blocknr: %llu", device, offset >> BLK_SHIFT );
+	EXIT_FUNC_(" device: %d blocknr: %llu", device, offset >> BLK_SHIFT );
 	return ret;
 }
 
@@ -1623,6 +1623,7 @@ static int order_devices(struct tier_device *dev)
 	struct data_policy *dtapolicy;
 	const char *devicename;
 	struct backing_device *backdev;
+	struct backing_device *backdev_tmp_list[MAX_BACKING_DEV];
 	ENTER_FUNC;
 
 	/* Allocate and load */
@@ -1630,24 +1631,17 @@ static int order_devices(struct tier_device *dev)
 		backdev = dev->backdev[i];
 		read_device_magic(dev, i, backdev->devmagic);
 		pr_info("fullpathname: %s", backdev->devmagic->fullpathname);
-		// convert to rw_semaphore
 		init_rwsem(&backdev->magic_lock);
-		// spin_lock_init(&backdev->magic_lock);
 		spin_lock_init(&backdev->dev_alloc_lock);
 	}
 
 	/* Check and swap */
 	for (i = 0; i < dev->attached_devices; i++) {
-		backdev = dev->backdev[i];
-		if (i != backdev->devmagic->device) {
-			struct backing_device *olddev;
-			int newnr;
+		backdev_tmp_list[i] = dev->backdev[i];
+	}
 
-			newnr = backdev->devmagic->device;
-			olddev = dev->backdev[newnr];
-			dev->backdev[newnr] = backdev;
-			dev->backdev[i] = olddev;
-		}
+	for (i = 0; i < dev->attached_devices; i++) {
+		dev->backdev[backdev_tmp_list[i]->devmagic->device] = backdev_tmp_list[i];
 	}
 
 	/* Generate UUID */
