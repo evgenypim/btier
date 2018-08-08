@@ -22,7 +22,7 @@
 #include "btier_main.h"
 #include <linux/random.h>
 
-#define TIER_VERSION "3.0.0"
+#define TIER_VERSION "3.0.1"
 
 MODULE_VERSION(TIER_VERSION);
 MODULE_LICENSE("GPL");

@@ -1,3 +1,9 @@
+btier (3.0.1-1) unstable; urgency=low
+
+  * Some fixes
+
+ -- evgenypim <evgeny.pim@gmail.com>  Wed, 8 Aug 2018 18:51:00 +0300
+
 btier (3.0.0-1) unstable; urgency=low
 
   * Bump version
