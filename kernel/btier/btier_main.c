@@ -162,7 +162,7 @@ static void tier_sysfs_exit(struct tier_device *dev)
 
 unsigned int get_average_reads(struct backing_device *backdev)
 {
-	return btier_div(atomic64_read(&backdev->devmagic->total_writes), backdev->devicesize >> BLK_SHIFT);
+	return btier_div(atomic64_read(&backdev->devmagic->total_reads), backdev->devicesize >> BLK_SHIFT);
 }
 
 unsigned int get_average_writes(struct backing_device *backdev)
