@@ -359,76 +359,24 @@ static ssize_t tier_attr_migration_policy_store(struct tier_device *dev,
 						const char *buf, size_t s)
 {
 	int devicenr, res;
-	unsigned int max_age;
-	unsigned int hit_collecttime;
+	unsigned int keep_free;
+	char devicename[1024];
 
-	char *cur = NULL;
-	char *a = NULL;
-	char *p = NULL;
-	char *devicename = NULL;
-	char *cpybuf;
-
-	cpybuf = null_term_buf(buf, s);
-	if (!cpybuf)
-		return -ENOMEM;
-
-	p = strchr(cpybuf, ' ');
-	if (!p)
-		goto end_error;
-	a = kzalloc(p - cpybuf + 1, GFP_KERNEL);
-	if (!a)
-		goto end_error;
-	memcpy(a, cpybuf, p - cpybuf);
-	res = sscanf(a, "%u", &devicenr);
-	kfree(a);
-	if (res != 1 || devicenr < 0 || devicenr >= dev->attached_devices)
-		goto end_error;
-	a = p;
-
-	while (a[0] == ' ')
-		a++;
-	p = strchr(a, ' ');
-	if (!p)
-		goto end_error;
-	devicename = kzalloc(p - cpybuf + 1, GFP_KERNEL);
-	if (!devicename) {
+	res = sscanf(buf, "%d %s %d", &devicenr, devicename, &keep_free);
+	if (res != 3 || devicenr < 0 || devicenr >= dev->attached_devices) {
 		goto end_error;
 	}
-	memcpy(devicename, a, p - a);
-	if (0 !=
-	    strcmp(devicename,
-		   dev->backdev[devicenr]->fds->f_path.dentry->d_name.name)) {
-		kfree(devicename);
+
+	if (0 != strcmp(devicename, dev->backdev[devicenr]->fds->f_path.dentry->d_name.name)) {
 		goto end_error;
 	}
-	kfree(devicename);
 
-	a = p;
-	while (a[0] == ' ')
-		a++;
-	p = strchr(a, ' ');
-	cur = kzalloc(p - a + 1, GFP_KERNEL);
-	if (!cur)
-        goto end_error;
-	memcpy(cur, a, p - a);
-	res = sscanf(cur, "%u", &max_age);
-	kfree(cur);
-	if (res != 1)
+	if ( keep_free < 0 || keep_free > 100) {
 		goto end_error;
-
-	a = p;
-	while (a[0] == ' ')
-		a++;
-	res = sscanf(a, "%u", &hit_collecttime);
-	if (res != 1)
-		goto end_error;
-	atomic_set(&dev->backdev[devicenr]->devmagic->dtapolicy.max_age, max_age);
-	atomic_set(&dev->backdev[devicenr]->devmagic->dtapolicy.hit_collecttime, hit_collecttime);
-	kfree(cpybuf);
+	}
+	atomic_set(&dev->backdev[devicenr]->devmagic->dtapolicy.keep_free, keep_free);
 	return s;
-
 end_error:
-	kfree(cpybuf);
 	return -ENOMSG;
 }
 
@@ -518,6 +466,8 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 	char *aiowq;
 	char *discard;
 	char *resumeblockwalk;
+	char *migration_total_hits;
+	char *total_hits;
 #ifndef MAX_PERFORMANCE
 	char *debug_state;
 	char debug_state_buf[DEBUG_STATE_STR_MAX_LEN];
@@ -532,6 +482,8 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 	iopending =  as_sprintf("async random ios pending     : %i\n", atomic_read(&dev->aio_pending));
 	qlock =      as_sprintf("main mutex                   : %s\n", rwsem_is_locked(&dev->qlock) ? "locked" : "unlocked");
 	aiowq =      as_sprintf("waiting on asynchrounous io  : %s\n", waitqueue_active(&dev->aio_event) ? "True" : "False");
+	migration_total_hits = as_sprintf("migration_total_hits         : %llu\n", dev->migration_total_hits);
+	total_hits = as_sprintf("total_hits                   : %llu\n", atomic64_read(&dev->total_hits));
 	resumeblockwalk = as_sprintf("resumeblockwalk              : %llu\n", dev->resumeblockwalk);
 #ifndef MAX_PERFORMANCE
 	spin_lock(&dev->dbg_lock);
@@ -541,9 +493,9 @@ static ssize_t tier_attr_internals_show(struct tier_device *dev, char *buf)
 	discard =    as_sprintf("discard request is pending   : %s\n", (cur_debug_state & DISCARD) ? "True" : "False");
 	state2name(cur_debug_state, debug_state_buf, DEBUG_STATE_STR_MAX_LEN);
 	debug_state =as_sprintf("debug state                  : %i [%s]\n", cur_debug_state, debug_state_buf);
-	res = sprintf(buf, "%s%s%s%s%s%s%s", iotype, iopending, qlock, aiowq, discard, debug_state, resumeblockwalk);
+	res = sprintf(buf, "%s%s%s%s%s%s%s%s%s", iotype, iopending, qlock, aiowq, discard, debug_state, migration_total_hits, total_hits, resumeblockwalk);
 #else //ifndef MAX_PERFORMANCE
-	res = sprintf(buf, "%s%s%s%s%s", iotype, iopending, qlock, aiowq, resumeblockwalk);
+	res = sprintf(buf, "%s%s%s%s%s%s%s", iotype, iopending, qlock, aiowq, migration_total_hits, total_hits, resumeblockwalk);
 #endif //ifndef MAX_PERFORMANCE
 	kfree(iotype);
 	kfree(iopending);
@@ -579,9 +531,9 @@ static ssize_t tier_attr_show_blockinfo_show(struct tier_device *dev, char *buf)
 		binfo = get_blockinfo(dev, blocknr, 0);
 		if (!binfo)
 			return res;
-		len = sprintf(buf + res, "%i,%llu,%lu,%u,%u\n",
-			      binfo->device - 1, binfo->offset, binfo->lastused,
-			      binfo->readcount, binfo->writecount);
+		len = sprintf(buf + res, "%llu,%i,%llu,%lu,%lu\n", blocknr,
+			      binfo->device - 1, binfo->offset, atomic64_read(&binfo->hits_ts),
+			      atomic64_read(&binfo->total_hits));
 		res += len;
 		if (!dev->user_selected_ispaged)
 			break;
@@ -641,17 +593,15 @@ static ssize_t tier_attr_migration_policy_show(struct tier_device *dev,
 	for (i = 0; i < dev->attached_devices; i++) {
 		if (!msg) {
 			msg2 = as_sprintf(
-			    "%7s %20s %15s %15s\n%7u %20s %15u %15u\n", "tier",
-			    "device", "max_age", "hit_collecttime", i,
+			    "%7s %20s %15s\n%7u %20s %15u\n", "tier",
+			    "device", "keep_free", i,
 			    dev->backdev[i]->fds->f_path.dentry->d_name.name,
-			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.max_age),
-			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.hit_collecttime));
+			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.keep_free));
 		} else {
 			msg2 = as_sprintf(
-			    "%s%7u %20s %15u %15u\n", msg, i,
+			    "%s%7u %20s %15u\n", msg, i,
 			    dev->backdev[i]->fds->f_path.dentry->d_name.name,
-			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.max_age),
-			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.hit_collecttime));
+			    atomic_read(&dev->backdev[i]->devmagic->dtapolicy.keep_free));
 		}
 		kfree(msg);
 		msg = msg2;
@@ -703,17 +653,16 @@ static ssize_t tier_attr_device_usage_show(struct tier_device *dev, char *buf)
 	u64 allocated;
 	unsigned int lcount = dev->attached_devices + 1;
 	u64 devblocks;
-
 	const char **lines = NULL;
 	char *line;
 	char *msg;
+
 	lines = kzalloc(lcount * sizeof(char *), GFP_KERNEL);
 	if (!lines)
 		return -ENOMEM;
-
-	line = as_sprintf("%7s %20s %15s %15s %15s %15s %15s %15s %15s\n", "TIER",
-			  "DEVICE", "SIZE MB", "ALLOCATED MB", "AVERAGE READS",
-			  "AVERAGE WRITES", "TOTAL_READS", "TOTAL_WRITES", "MAGIC_LOCK");
+	line = as_sprintf("%7s %20s %15s %15s %15s %15s %15s %15s\n",
+			"TIER", "DEVICE", "SIZE_MB", "ALLOCATED_MB", "ALLOCATED_BLOCKS",
+			"AVERAGE_HITS", "TOTAL_HITS", "MAGIC_LOCK");
 	if (!line) {
 		kfree(lines);
 		return -ENOMEM;
@@ -729,14 +678,13 @@ static ssize_t tier_attr_device_usage_show(struct tier_device *dev, char *buf)
 			    BLK_SHIFT;
 
 		line = as_sprintf(
-		    "%7u %20s %15llu %15llu %15u %15u %15llu %15llu %15s\n", i,
-		    dev->backdev[i]->fds->f_path.dentry->d_name.name, devblocks,
-		    allocated,
-		    get_average_reads(dev->backdev[i]),
-		    get_average_writes(dev->backdev[i]),
-		    atomic64_read(&dev->backdev[i]->devmagic->total_reads),
-		    atomic64_read(&dev->backdev[i]->devmagic->total_writes),
-		    rwsem_is_locked(&dev->backdev[i]->magic_lock) ? "locked" : "unlocked");
+			"%7u %20s %15llu %15llu %15llu %15llu %15llu %15s\n",
+			i, dev->backdev[i]->fds->f_path.dentry->d_name.name, devblocks,
+			allocated,
+			atomic64_read(&dev->backdev[i]->allocated_blocks),
+			get_average_hits(dev->backdev[i]),
+			atomic64_read(&dev->backdev[i]->devmagic->total_hits),
+			rwsem_is_locked(&dev->backdev[i]->magic_lock) ? "locked" : "unlocked");
 		lines[i + 1] = line;
 	}
 	msg = as_strarrcat(lines, i + 1);

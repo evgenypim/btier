@@ -56,20 +56,16 @@ typedef unsigned long u32;
 
 #ifdef VERBOSE_DEBUG
 #define ENTER_FUNC pr_info("Enter %s[%d]", __FUNCTION__, __LINE__)
-#define ENTER_FUNC_(_f_, ...) pr_info("Enter %s[%d]" _f_ , __FUNCTION__, __LINE__, __VA_ARGS__)
 
 #define EXIT_FUNC pr_info("Leave %s[%d]", __FUNCTION__, __LINE__)
-#define EXIT_FUNC_(_f_, ...) pr_info("Leave %s[%d]" _f_, __FUNCTION__, __LINE__, __VA_ARGS__)
 
 #define FUNC_LINE pr_info("Funct %s[%d]", __FUNCTION__, __LINE__)
 
 #else //VERBOSE_DEBUG
 
 #define ENTER_FUNC
-#define ENTER_FUNC_(_f_, ...)
 
 #define EXIT_FUNC
-#define EXIT_FUNC_(_f_, ...)
 
 #define FUNC_LINE
 #endif //VERBOSE_DEBUG
@@ -142,6 +138,7 @@ typedef unsigned long u32;
 #define TIERWRITE 2
 #define FSMODE 1 /* vfs datasync mode 0 or 1 */
 
+#define TIERKEEPFREE 10 /* try to keep free 10% of tier */
 #define TIERMAXAGE                                                             \
 	86400 /* When a chunk has not been used TIERMAXAGE it                  \
 		 will migrate to a slower (higher) tier */
@@ -180,8 +177,8 @@ enum states {
 #endif
 
 struct physical_data_policy {
-	unsigned int max_age;
-	unsigned int hit_collecttime;
+	unsigned int keep_free;
+	unsigned int hit_collecttime_NOT_IN_USE;
 	unsigned int sequential_landing;
 	int migration_enabled;
 	u64 migration_interval;
@@ -189,8 +186,7 @@ struct physical_data_policy {
 
 #ifdef __KERNEL__
 struct data_policy {
-	atomic_t max_age;
-	atomic_t hit_collecttime;
+	atomic_t keep_free;
 	atomic_t sequential_landing;
 	atomic_t migration_enabled;
 	atomic64_t migration_interval;
@@ -200,9 +196,9 @@ struct data_policy {
 struct physical_blockinfo {
 	unsigned int device;
 	u64 offset;
-	time_t lastused;
-	unsigned int readcount;
-	unsigned int writecount;
+	time_t lastused_NOT_IN_USE;
+	unsigned int readcount_NOT_IN_USE;
+	unsigned int writecount_NOT_IN_USE;
 } __attribute__((packed));
 
 struct physical_devicemagic {
@@ -214,8 +210,8 @@ struct physical_devicemagic {
 	struct physical_blockinfo binfo_journal_old;
 	unsigned int average_reads_NOT_IN_USE;
 	unsigned int average_writes_NOT_IN_USE;
-	u64 total_reads;
-	u64 total_writes;
+	u64 total_reads_NOT_IN_USE;
+	u64 total_writes_NOT_IN_USE;
 	time_t average_age_NOT_IN_USE;
 	u64 devicesize;
 	u64 total_device_size;  /* Only valid for tier 0 */
@@ -240,9 +236,10 @@ struct devicemagic {
 	struct physical_blockinfo binfo_journal_old;	//M
 	atomic_t average_reads_NOT_IN_USE;				//Ignore
 	atomic_t average_writes_NOT_IN_USE;				//Ignore
-	atomic64_t total_reads;
-	atomic64_t total_writes;
+	atomic64_t total_reads_NOT_IN_USE;
+	atomic64_t total_writes_NOT_IN_USE;
 	time_t average_age_NOT_IN_USE;
+	atomic64_t total_hits;
 	atomic64_t devicesize;
 	u64 total_device_size;  /* Only valid for tier 0 */
 	u64 total_bitlist_size; /* Only valid for tier 0 */
@@ -288,9 +285,8 @@ struct blockinfo {
 	u32 reserved;
 	unsigned int device;
 	u64 offset;
-	time_t lastused;
-	unsigned int readcount;
-	unsigned int writecount;
+	atomic64_t hits_ts; // total dev hits at last access
+	atomic64_t total_hits;
 };
 
 struct bio_meta {
@@ -329,6 +325,7 @@ struct backing_device {
 	struct blockinfo **blocklist;
 	u64 *free_offset_list;
 	u64 first_free;
+	atomic64_t allocated_blocks;
 	u8 *bitlist;
 	/* dev_alloc_lock, protects bitlist, usedoffset and free_offset*/
 	spinlock_t dev_alloc_lock;
@@ -400,6 +397,9 @@ struct tier_device {
 	struct tier_stats stats;
 
 	u64 resumeblockwalk;
+	u64 migration_total_hits;
+	atomic64_t total_hits;
+
 	struct rw_semaphore qlock;
 	wait_queue_head_t migrate_event;
 	wait_queue_head_t aio_event;
@@ -418,6 +418,7 @@ struct tier_device {
 	u64 user_selected_blockinfo;
 	int user_selected_ispaged;
 	unsigned int users;
+	char uuid[UUID_LEN];
 };
 
 struct tier_work {
@@ -456,8 +457,7 @@ int migrate_direct(struct tier_device *, u64, int);
 void btier_lock(struct tier_device *);
 void btier_unlock(struct tier_device *);
 
-unsigned int get_average_reads(struct backing_device *);
-unsigned int get_average_writes(struct backing_device *);
+u64 get_average_hits(struct backing_device *backdev);
 #endif
 
 #ifdef HAVE_2ARG_LOOKUP_BDEV

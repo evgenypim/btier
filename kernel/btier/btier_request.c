@@ -279,24 +279,16 @@ struct blockinfo *get_blockinfo(struct tier_device *dev, u64 blocknr,
 			binfo = NULL;
 			goto err_ret;
 		}
-		backdev = dev->backdev[binfo->device - 1];
 
-		/* update accesstime and hitcount */
-		if (updatemeta > 0) {
-			if (updatemeta == TIERREAD) {
-				if (binfo->readcount < MAX_STAT_COUNT) {
-					binfo->readcount++;
-					atomic64_inc(&backdev->devmagic->total_reads);
-				}
-			} else {
-				if (binfo->writecount < MAX_STAT_COUNT) {
-					binfo->writecount++;
-					atomic64_inc(&backdev->devmagic->total_writes);
-				}
-			}
-
-			binfo->lastused = get_seconds();
+		if (updatemeta) {
+			atomic64_inc(&dev->backdev[binfo->device - 1]->devmagic->total_hits);
+			atomic64_inc(&binfo->total_hits);
+			atomic64_inc(&dev->total_hits);
+			atomic64_set(&binfo->hits_ts, atomic64_read(&dev->total_hits));
 		}
+	} else if (updatemeta) {
+		atomic64_set(&binfo->hits_ts, atomic64_read(&dev->total_hits));
+		atomic64_inc(&dev->total_hits);
 	}
 
 err_ret:
@@ -373,7 +365,6 @@ void tier_discard(struct tier_device *dev, u64 offset, unsigned int size)
 				 "size %u\n",
 				 blocknr, offset, size);
 			clear_dev_list(dev, binfo);
-			reset_counters_on_migration(dev, binfo);
 			discard_on_real_device(dev, binfo);
 			memset(binfo, 0, sizeof(struct blockinfo));
 			write_blocklist(dev, blocknr, binfo, WD);

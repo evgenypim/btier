@@ -6,9 +6,6 @@ static int tier_file_write(struct tier_device *, unsigned int, void *, size_t,
 			   loff_t);
 static int tier_file_read(struct tier_device *, unsigned int, void *, const int,
 			  loff_t);
-struct file *get_dev_file(struct tier_device *, unsigned int);
-static int migrate_up_ifneeded(struct tier_device *, struct blockinfo *, u64);
-static int migrate_down_ifneeded(struct tier_device *, struct blockinfo *, u64);
 static void free_blocklist(struct tier_device *);
 
 #endif /* _BTIER_MAIN_H_ */
