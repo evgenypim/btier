@@ -1,5 +1,6 @@
 Tiered storage kernel driver for Linux forked from [btier](https://github.com/tsutsu/btier).
 Tested on Ubuntu 14.04 with 4.4.0-62-generic kernel.
+Tested on Ubuntu 18.04 with 5.0.0-1003-bluefield kernel.
 Features:
  * dkms support
  * load btier.ko at boot time (rebuild initrd after bttab altering is required)
