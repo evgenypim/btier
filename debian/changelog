@@ -1,3 +1,29 @@
+btier (3.0.1-1) unstable; urgency=low
+
+  * Some fixes
+
+ -- evgenypim <evgeny.pim@gmail.com>  Wed, 8 Aug 2018 18:51:00 +0300
+
+btier (3.0.0-1) unstable; urgency=low
+
+  * Bump version
+
+ -- evgenypim <evgeny.pim@gmail.com>  Mon, 23 Jul 2018 11:19:00 +0300
+
+btier (2.2.0-1) unstable; urgency=low
+
+  * Bump version
+
+ -- evgenypim <evgeny.pim@gmail.com>  Sun, 8 Jul 2018 16:56:41 +0300
+
+btier (2.1.6-1) unstable; urgency=low
+
+  * Merged https://github.com/trisk/btier.git
+   - kernel 4.9 support
+   - debian 9 support
+
+ -- evgenypim <evgeny.pim@gmail.com>  Thu, 18 Jan 2018 12:30:41 +0300
+
 btier (2.0.1-2) unstable; urgency=low
 
   * Bug fixes

@@ -1,4 +1,4 @@
-VERSION := 2.0.1
+VERSION := 3.0.1
 
 CC := gcc -O2
 
@@ -31,6 +31,9 @@ install_dkms_src:
 	install -m 644 kernel/btier/*.c $(DESTDIR)/usr/src/btier-$(VERSION)/
 	install -m 644 kernel/btier/dkms.conf $(DESTDIR)/usr/src/btier-$(VERSION)/
 	install -m 644 kernel/btier/Makefile $(DESTDIR)/usr/src/btier-$(VERSION)/
+	install -d -m 744 $(DESTDIR)/usr/src/btier-$(VERSION)/test_lookup_bdev_func
+	install -m 644 kernel/btier/test_lookup_bdev_func/Makefile $(DESTDIR)/usr/src/btier-$(VERSION)/test_lookup_bdev_func/
+	install -m 644 kernel/btier/test_lookup_bdev_func/*.c $(DESTDIR)/usr/src/btier-$(VERSION)/test_lookup_bdev_func/
 
 
 uninstall_userspace:
@@ -43,7 +46,7 @@ uninstall_userspace:
 	rm -r $(DESTDIR)/usr/src/btier-$(VERSION)
 
 clean:
-	$(MAKE) -Wall -C kernel/btier modules
+	$(MAKE) -C kernel/btier clean
 	rm -f usr/share/man/man1/btier_inspect.1.gz
 	rm -f usr/share/man/man1/btier_setup.1.gz
 	rm -f cli/btier_setup

@@ -14,10 +14,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define die_ioctlerr(f...)                                                     \
+#define die_ioctlerr(i, fd)                                                    \
 	{                                                                      \
-		fprintf(stderr, (f));                                          \
-		flock(fd, LOCK_UN);                                            \
+		if (i != TIER_INIT && i != TIER_DEREGISTER)                    \
+			tier_setup(fd, TIER_DESTROY, 0);                       \
+		fprintf(stderr, "ioctl %s failed on /dev/tiercontrol\n", #i);  \
+		close(fd);                                                     \
 		exit(-1);                                                      \
 	}
 #define die_syserr()                                                           \
@@ -145,12 +147,12 @@ void write_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 			u64 blocklistsize, struct backing_device *bdev)
 {
 	char *block;
-	struct devicemagic magic;
+	struct physical_devicemagic magic;
 	int res;
 
 	block = s_malloc(BLKSIZE);
 	memset(block, 0, BLKSIZE);
-	memset(&magic, 0, sizeof(struct devicemagic));
+	memset(&magic, 0, sizeof(struct physical_devicemagic));
 	magic.magic = TIER_DEVICE_BIT_MAGIC;
 	magic.device = devicenr;
 	magic.total_device_size = total_device_size;
@@ -163,11 +165,20 @@ void write_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 	if (strlen(bdev->datafile) > 1024)
 		exit(-ENAMETOOLONG);
 	memcpy(&magic.fullpathname, bdev->datafile, strlen(bdev->datafile));
-	memcpy(block, &magic, sizeof(struct devicemagic));
+	memcpy(block, &magic, sizeof(struct physical_devicemagic));
 	res = s_pwrite(fd, block, BLKSIZE, 0);
 	if (res != BLKSIZE)
 		die_syserr();
 	free(block);
+
+	fsync(fd);
+	res = s_pread(fd, &magic, sizeof(struct physical_devicemagic), 0);
+	if (res != sizeof(struct physical_devicemagic))
+		die_syserr();
+	if (magic.magic != TIER_DEVICE_BIT_MAGIC) {
+		fprintf(stderr, "Datastore %s failed to verify written magic\n",
+			bdev->datafile);
+	}
 }
 
 void clear_list(int fd, u64 size, u64 soffset)
@@ -198,7 +209,7 @@ int tier_set_fd(int fd, char *datafile, int devicenr)
 	u64 devsize;
 	u64 round;
 	struct stat stbuf;
-	struct devicemagic tier_magic;
+	struct physical_devicemagic tier_magic;
 	u64 soffset = 0;
 	int header_size = TIER_HEADERSIZE;
 
@@ -244,6 +255,11 @@ int tier_set_fd(int fd, char *datafile, int devicenr)
 		       datafile, soffset, soffset, devsize, devsize,
 		       bitlistsize, bitlistsize);
 		clear_list(ffd, bitlistsize, soffset);
+		memset(&tier_magic, 0, sizeof(tier_magic));
+		tier_magic.magic = TIER_DEVICE_BIT_MAGIC;
+		res = s_pwrite(ffd, &tier_magic, sizeof(tier_magic), 0);
+		if (res != sizeof(tier_magic))
+			die_syserr();
 	} else {
 		res = s_pread(ffd, &tier_magic, sizeof(tier_magic), 0);
 		if (res != sizeof(tier_magic))
@@ -261,47 +277,35 @@ int tier_set_fd(int fd, char *datafile, int devicenr)
 
 	res = ioctl(fd, TIER_SET_FD, &fds);
 	if (res < 0) {
-		int rc = 1;
-		fprintf(stderr,
-			"ioctl TIER_SET_FDX failed on /dev/tiercontrol\n");
 		close(fds.fd);
-		return rc;
+		return -1;
 	}
 	return 0;
 }
 
 int tier_setup(int op, int fd, int devicenr)
 {
-	int ffd, i;
-	char *pass;
-	char *filename;
-	u64 fsize;
+	char *devname;
 	int ret = 0;
-	int rc;
 
 	switch (op) {
 	case TIER_SET_FD:
 		if (0 != tier_set_fd(fd, mkoptions.backdev[devicenr]->datafile,
 				     devicenr)) {
-			rc = 1;
-			return rc;
+			ret = 1;
 		}
 		break;
 	case TIER_SET_SECTORSIZE:
 		if (ioctl(fd, TIER_SET_SECTORSIZE, mkoptions.sectorsize) < 0) {
-			rc = 1;
-			fprintf(stderr, "ioctl TIER_SET_SECTORSIZE failed on "
-					"/dev/tiercontrol\n");
-			return rc;
+			ret = 1;
 		}
 		break;
 	case TIER_REGISTER:
-		if (ioctl(fd, TIER_REGISTER, 0) < 0) {
-			rc = 1;
-			fprintf(
-			    stderr,
-			    "ioctl TIER_REGISTER failed on /dev/tiercontrol\n");
-			return rc;
+		devname = s_malloc(1 + strlen("/dev/sdtierX"));
+		if (ioctl(fd, TIER_REGISTER, devname) < 0) {
+			ret = 1;
+		} else {
+			printf("%s\n", devname);
 		}
 		break;
 	case TIER_DEREGISTER:
@@ -314,26 +318,26 @@ int tier_setup(int op, int fd, int devicenr)
 				    mkoptions.device);
 				fprintf(stderr, "Is the device still mounted "
 						"or in use by multipathd?\n");
-			} else
-				fprintf(stderr, "ioctl TIER_DEREGISTER failed "
-						"on /dev/tiercontrol\n");
-			rc = 1;
-			return rc;
+			}
+			ret = 1;
 		}
 		break;
 	case TIER_INIT:
 		if (ioctl(fd, TIER_INIT, 0) < 0) {
-			rc = 1;
-			fprintf(stderr,
-				"ioctl TIER_INIT failed on /dev/tiercontrol\n");
-			return rc;
+			ret = 1;
+		}
+		break;
+	case TIER_DESTROY:
+		if (ioctl(fd, TIER_DESTROY, 0) < 0) {
+			ret = 1;
 		}
 		break;
 	default:
 		fprintf(stderr, "OP =%02x\n", op);
 		abort();
 	}
-	return 0;
+
+	return ret;
 }
 
 void usage(char *name)
@@ -437,7 +441,6 @@ int get_opts(int argc, char *argv[])
 		       "specified with -f\n");
 		ret = -1;
 	}
-	printf("\n");
 	return ret;
 }
 
@@ -494,15 +497,21 @@ int main(int argc, char *argv[])
 		}
 		ret = tier_setup(TIER_DEREGISTER, fd, 0);
 		if (0 != ret)
-			die_ioctlerr("ioctl TIER_DEREGISTER failed\n");
-		exit(ret);
+			die_ioctlerr(TIER_DEREGISTER, fd);
+		goto end_exit;
 	}
 
 	ret = tier_setup(TIER_INIT, fd, 0);
 	if (0 != ret)
-		die_ioctlerr("ioctl TIER_INIT failed\n");
+		die_ioctlerr(TIER_INIT, fd);
 	for (count = 0; count <= mkoptions.backdev_count; count++) {
 		dtaexists = stat(mkoptions.backdev[count]->datafile, &stdta);
+		if (-1 == dtaexists) {
+			fprintf(stderr, "Failed to stat backend device %s\n",
+				mkoptions.backdev[count]->datafile);
+			ret = -1;
+			goto end_error;
+		}
 		if (S_ISBLK(stdta.st_mode)) {
 			if ((ffd = open(mkoptions.backdev[count]->datafile,
 					mode, 0600)) < 0) {
@@ -510,7 +519,8 @@ int main(int argc, char *argv[])
 					fprintf(
 					    stderr, "Failed to open file %s\n",
 					    mkoptions.backdev[count]->datafile);
-					exit(-1);
+					ret = -1;
+					goto end_error;
 				}
 			}
 			devsize = lseek64(ffd, 0, SEEK_END);
@@ -518,14 +528,16 @@ int main(int argc, char *argv[])
 				fprintf(stderr,
 					"Error while opening %llu : %s\n",
 					devsize, strerror(errno));
-				return -1;
+				ret = -1;
+				goto end_error;
 			}
 			close(ffd);
 		} else {
 			fprintf(stderr, "Btier 2.0 no longer supports the use "
 					"of files as backend devices: %s\n",
 				mkoptions.backdev[count]->datafile);
-			return -1;
+			ret = -1;
+			goto end_error;
 		}
 		printf("Device size (raw)              : 0x%llx (%llu)\n",
 		       devsize, devsize);
@@ -533,14 +545,10 @@ int main(int argc, char *argv[])
 		printf("Device size (rnd)              : 0x%llx (%llu)\n",
 		       devsize, devsize);
 		mkoptions.total_device_size += devsize - TIER_DEVICE_PLAYGROUND;
-		if (-1 == dtaexists) {
-			fprintf(stderr, "Failed to stat backend device %s\n",
-				mkoptions.backdev[count]->datafile);
-			exit(-1);
-		}
+
 		ret = tier_setup(TIER_SET_FD, fd, count);
 		if (0 != ret)
-			die_ioctlerr("ioctl TIER_SET_FD failed\n");
+			die_ioctlerr(TIER_SET_FD, fd);
 		mkoptions.bitlistsize_total +=
 		    mkoptions.backdev[count]->bitlistsize;
 	}
@@ -549,7 +557,7 @@ int main(int argc, char *argv[])
 		printf("Sector size = %u\n", mkoptions.sectorsize);
 		ret = tier_setup(TIER_SET_SECTORSIZE, fd, 0);
 		if (0 != ret)
-			die_ioctlerr("ioctl TIER_SET_SECTORSIZE failed\n");
+			die_ioctlerr(TIER_SET_SECTORSIZE, fd);
 	}
 
 	mkoptions.blocklistsize = calc_blocklist_size(
@@ -590,9 +598,15 @@ int main(int argc, char *argv[])
 			    mkoptions.blocklistsize, mkoptions.backdev[count]);
 		}
 	}
+end_error:
+	if (ret != 0) {
+		(void)tier_setup(TIER_DESTROY, fd, 0);
+		goto end_exit;
+	}
 	ret = tier_setup(TIER_REGISTER, fd, 0);
-	if (0 != ret)
-		die_ioctlerr("ioctl TIER_REGISTER failed\n");
+	if (ret != 0)
+		die_ioctlerr(TIER_REGISTER, fd);
+
 
 end_exit:
 	flock(fd, LOCK_UN);

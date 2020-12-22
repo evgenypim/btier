@@ -3,14 +3,13 @@
 
 #ifdef __KERNEL__
 #define pr_fmt(fmt) "btier: " fmt
+#include "btier_config.h"
 #include "btier_common.h"
 #include <asm/div64.h>
 #include <linux/atomic.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
-#include <linux/blkdev.h>
 #include <linux/completion.h>
-#include <linux/crypto.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -30,7 +29,6 @@
 #include <linux/moduleparam.h>
 #include <linux/mutex.h>
 #include <linux/rwsem.h>
-#include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/sysfs.h>
@@ -54,13 +52,36 @@ typedef unsigned long u32;
 
 */
 
+// #define VERBOSE_DEBUG
+
+#ifdef VERBOSE_DEBUG
+#define ENTER_FUNC pr_info("Enter %s[%d]", __FUNCTION__, __LINE__)
+
+#define EXIT_FUNC pr_info("Leave %s[%d]", __FUNCTION__, __LINE__)
+
+#define FUNC_LINE pr_info("Funct %s[%d]", __FUNCTION__, __LINE__)
+
+#else //VERBOSE_DEBUG
+
+#define ENTER_FUNC
+
+#define EXIT_FUNC
+
+#define FUNC_LINE
+#endif //VERBOSE_DEBUG
+
 #define BTIER_MAX_SIZE                                                         \
-	1125899906842624ULL /* 1PB for now, although 4PB or higher is possible \
-			       */
-#define BLKSIZE                                                                \
-	1048576      /*Moving smaller blocks then 1M                           \
-		       will lead to fragmentation */
-#define BLK_SHIFT 20 /*Adjust when changing BLKSIZE */
+	1125899906842624ULL /* 1PB for now, although 4PB or higher is possible  */
+
+/* Moving smaller blocks then 1M will lead to fragmentation */
+#define BLK_SHIFT 20 /*Adjust for changing BLKSIZE */
+#define BLKSIZE	(1 << BLK_SHIFT)
+
+#define SECTOR_SHIFT 9
+#define KERNEL_SECTORSIZE (1ULL << SECTOR_SHIFT)
+
+#define MIN_LOGICAL_BLOCK_SIZE 512
+#define MAX_LOGICAL_BLOCK_SIZE 4096
 
 //#define PAGE_SHIFT 12		/*4k page size */
 #define TIER_NAME_SIZE 64 /* Max lenght of the filenames */
@@ -68,6 +89,7 @@ typedef unsigned long u32;
 #define TIER_SET_DEVSZ 0xFE03
 #define TIER_REGISTER 0xFE04
 #define TIER_DEREGISTER 0xFE05
+#define TIER_DESTROY 0xFE06
 #define TIER_INIT 0xFE07
 #define TIER_BARRIER 0xFE08
 #define TIER_CACHESIZE 0xFE09
@@ -83,16 +105,19 @@ typedef unsigned long u32;
 #define BTIER_MAX_DEVS 26
 #define BTIER_MAX_INFLIGHT 256
 
-#define TIGER_HASH_LEN 24
+#define UUID_LEN 24
 
 #define RANDOM 0x01
 #define SEQUENTIAL 0x02
-#define KERNEL_SECTORSIZE 512
 #define MAX_BACKING_DEV 24
 /* Tier reserves 2 MB per device for playing data migration games. */
 #define TIER_DEVICE_PLAYGROUND BLKSIZE * 2
 
+#define NO_IO 0
 #define NORMAL_IO 1
+
+#define NO_MIGRATION 0
+#define MIGRATION_TIMER_EXPIRED 1
 #define MIGRATION_IO 2
 
 #define CLEAN 1
@@ -113,6 +138,7 @@ typedef unsigned long u32;
 #define TIERWRITE 2
 #define FSMODE 1 /* vfs datasync mode 0 or 1 */
 
+#define TIERKEEPFREE 10 /* try to keep free 10% of tier */
 #define TIERMAXAGE                                                             \
 	86400 /* When a chunk has not been used TIERMAXAGE it                  \
 		 will migrate to a slower (higher) tier */
@@ -150,34 +176,43 @@ enum states {
 };
 #endif
 
-struct data_policy {
-	unsigned int max_age;
-	unsigned int hit_collecttime;
+struct physical_data_policy {
+	unsigned int keep_free;
+	unsigned int hit_collecttime_NOT_IN_USE;
 	unsigned int sequential_landing;
-	int migration_disabled;
+	int migration_enabled;
 	u64 migration_interval;
 };
+
+#ifdef __KERNEL__
+struct data_policy {
+	atomic_t keep_free;
+	atomic_t sequential_landing;
+	atomic_t migration_enabled;
+	atomic64_t migration_interval;
+};
+#endif //__KERNEL__
 
 struct physical_blockinfo {
 	unsigned int device;
 	u64 offset;
-	time_t lastused;
-	unsigned int readcount;
-	unsigned int writecount;
+	time_t lastused_NOT_IN_USE;
+	unsigned int readcount_NOT_IN_USE;
+	unsigned int writecount_NOT_IN_USE;
 } __attribute__((packed));
 
-struct devicemagic {
+struct physical_devicemagic {
 	unsigned int magic;
 	unsigned int device;
 	unsigned int clean;
 	u64 blocknr_journal;
 	struct physical_blockinfo binfo_journal_new;
 	struct physical_blockinfo binfo_journal_old;
-	unsigned int average_reads;
-	unsigned int average_writes;
-	u64 total_reads;
-	u64 total_writes;
-	time_t average_age;
+	unsigned int average_reads_NOT_IN_USE;
+	unsigned int average_writes_NOT_IN_USE;
+	u64 total_reads_NOT_IN_USE;
+	u64 total_writes_NOT_IN_USE;
+	time_t average_age_NOT_IN_USE;
 	u64 devicesize;
 	u64 total_device_size;  /* Only valid for tier 0 */
 	u64 total_bitlist_size; /* Only valid for tier 0 */
@@ -186,9 +221,37 @@ struct devicemagic {
 	u64 startofbitlist;
 	u64 startofblocklist;
 	char fullpathname[1025];
-	struct data_policy dtapolicy;
-	char uuid[24];
+	struct physical_data_policy dtapolicy;
+	char uuid[UUID_LEN];
 } __attribute__((packed));
+// TODO: FIX struct layout
+
+#ifdef __KERNEL__
+struct devicemagic {
+	unsigned int magic;
+	unsigned int device;
+	unsigned int clean;								//M
+	u64 blocknr_journal;							//M
+	struct physical_blockinfo binfo_journal_new;	//M
+	struct physical_blockinfo binfo_journal_old;	//M
+	atomic_t average_reads_NOT_IN_USE;				//Ignore
+	atomic_t average_writes_NOT_IN_USE;				//Ignore
+	atomic64_t total_reads_NOT_IN_USE;
+	atomic64_t total_writes_NOT_IN_USE;
+	time_t average_age_NOT_IN_USE;
+	atomic64_t total_hits;
+	atomic64_t devicesize;
+	u64 total_device_size;  /* Only valid for tier 0 */
+	u64 total_bitlist_size; /* Only valid for tier 0 */
+	u64 bitlistsize;
+	atomic64_t blocklistsize;
+	u64 startofbitlist;
+	atomic64_t startofblocklist;
+	char fullpathname[1025];
+	struct data_policy dtapolicy;
+	char uuid[UUID_LEN];
+};
+#endif //__KERNEL__
 
 struct fd_s {
 	int fd;
@@ -222,9 +285,8 @@ struct blockinfo {
 	u32 reserved;
 	unsigned int device;
 	u64 offset;
-	time_t lastused;
-	unsigned int readcount;
-	unsigned int writecount;
+	atomic64_t hits_ts; // total dev hits at last access
+	atomic64_t total_hits;
 };
 
 struct bio_meta {
@@ -244,6 +306,8 @@ struct bio_meta {
 	unsigned allocate : 1;
 };
 
+#define FREE_LIST_END (-1)
+#define FREE_LIST_ALLOCATED_MARK (-2)
 struct backing_device {
 	struct file *fds;
 	u64 bitlistsize;
@@ -253,12 +317,15 @@ struct backing_device {
 	u64 startofbitlist;
 	u64 startofblocklist;
 	u64 bitbufoffset;
-	u64 free_offset;
-	u64 usedoffset;
+	u64 free_offset_NOT_IN_USE;
+	u64 usedoffset_NOT_IN_USE;
 	unsigned int dirty;
 	struct devicemagic *devmagic;
-	spinlock_t magic_lock;
+	struct rw_semaphore magic_lock;
 	struct blockinfo **blocklist;
+	u64 *free_offset_list;
+	u64 first_free;
+	atomic64_t allocated_blocks;
 	u8 *bitlist;
 	/* dev_alloc_lock, protects bitlist, usedoffset and free_offset*/
 	spinlock_t dev_alloc_lock;
@@ -289,14 +356,14 @@ struct tier_device {
 
 	int (*ioctl)(struct tier_device *, int cmd, u64 arg);
 
-	u64 nsectors;
+	sector_t nsectors;
 	unsigned int logical_block_size;
-	struct backing_device **backdev;
+	struct backing_device *backdev[MAX_BACKING_DEV];
 	struct block_device *tier_device;
 	u64 size;
 	u64 blocklistsize;
 	/* block lock for per block meta data*/
-	struct mutex *block_lock;
+	struct rw_semaphore *block_lock;
 	spinlock_t dbg_lock;
 
 	struct gendisk *gd;
@@ -330,6 +397,9 @@ struct tier_device {
 	struct tier_stats stats;
 
 	u64 resumeblockwalk;
+	u64 migration_total_hits;
+	atomic64_t total_hits;
+
 	struct rw_semaphore qlock;
 	wait_queue_head_t migrate_event;
 	wait_queue_head_t aio_event;
@@ -348,6 +418,7 @@ struct tier_device {
 	u64 user_selected_blockinfo;
 	int user_selected_ispaged;
 	unsigned int users;
+	char uuid[UUID_LEN];
 };
 
 struct tier_work {
@@ -378,16 +449,19 @@ void clear_dev_list(struct tier_device *dev, struct blockinfo *binfo);
 void reset_counters_on_migration(struct tier_device *dev,
 				 struct blockinfo *binfo);
 
-void free_bitlists(struct tier_device *);
 void resize_tier(struct tier_device *);
-int load_bitlists(struct tier_device *);
 void *as_sprintf(const char *, ...);
 u64 allocated_on_device(struct tier_device *, int);
 void btier_clear_statistics(struct tier_device *dev);
 int migrate_direct(struct tier_device *, u64, int);
-char *tiger_hash(char *, unsigned int);
 void btier_lock(struct tier_device *);
 void btier_unlock(struct tier_device *);
+
+u64 get_average_hits(struct backing_device *backdev);
 #endif
+
+#ifdef HAVE_2ARG_LOOKUP_BDEV
+#define lookup_bdev(pathname) lookup_bdev(pathname, 0)
+#endif /* HAVE_2ARG_LOOKUP_BDEV */
 
 #endif /* _BTIER_H_ */

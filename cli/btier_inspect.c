@@ -142,7 +142,7 @@ static struct option_info mkoptions;
 void backup_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 			 u64 blocklistsize, struct backing_device *bdev)
 {
-	struct devicemagic magic;
+	struct physical_devicemagic magic;
 	int res, sfd;
 	char *sp = "/tmp/magic_dev";
 	char *fsp;
@@ -153,7 +153,7 @@ void backup_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 	free(fsp);
 	if (sfd < 0)
 		die_syserr();
-	memset(&magic, 0, sizeof(struct devicemagic));
+	memset(&magic, 0, sizeof(struct physical_devicemagic));
 	res = s_pread(fd, &magic, sizeof(magic), 0);
 	if (res != sizeof(magic))
 		die_syserr();
@@ -165,7 +165,7 @@ void backup_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 void restore_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 			  u64 blocklistsize, struct backing_device *bdev)
 {
-	struct devicemagic magic;
+	struct physical_devicemagic magic;
 	int res, sfd;
 	char *sp = "/tmp/magic_dev";
 	char *fsp;
@@ -176,7 +176,7 @@ void restore_device_magic(int fd, u64 total_device_size, unsigned int devicenr,
 	free(fsp);
 	if (sfd < 0)
 		die_syserr();
-	memset(&magic, 0, sizeof(struct devicemagic));
+	memset(&magic, 0, sizeof(struct physical_devicemagic));
 	res = s_pread(sfd, &magic, sizeof(magic), 0);
 	if (res != sizeof(magic))
 		die_syserr();
@@ -260,7 +260,7 @@ int tier_set_fd(int fd, char *datafile, int devicenr)
 	u64 devsize;
 	u64 round;
 	struct stat stbuf;
-	struct devicemagic tier_magic;
+	struct physical_devicemagic tier_magic;
 	u64 soffset = 0;
 	int header_size = TIER_HEADERSIZE;
 

@@ -2,9 +2,7 @@
 
 u64 round_to_blksize(u64 size)
 {
-	u64 roundsize;
-	roundsize = (size >> BLK_SHIFT) << BLK_SHIFT;
-	return roundsize;
+	return (size >> BLK_SHIFT) << BLK_SHIFT;
 }
 
 u64 calc_bitlist_size(u64 devicesize)

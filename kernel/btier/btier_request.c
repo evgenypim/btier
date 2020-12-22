@@ -20,7 +20,11 @@ static void tier_submit_bio(struct tier_device *dev, unsigned int device,
 	set_debug_info(dev, BIO);
 
 	bio->bi_iter.bi_sector = start_sector;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bio_set_dev(bio, bdev);
+#else
 	bio->bi_bdev = bdev;
+#endif
 
 	generic_make_request(bio);
 	clear_debug_info(dev, BIO);
@@ -38,7 +42,7 @@ unsigned int get_chunksize(struct block_device *bdev, struct bio *bio)
 
 	max_hwsectors = queue_max_hw_sectors(q);
 	max_sectors = queue_max_sectors(q);
-	chunksize = min(max_hwsectors, max_sectors) << 9;
+	chunksize = min(max_hwsectors, max_sectors) << SECTOR_SHIFT;
 
 	bio_for_each_segment(bv, bio, iter)
 	{
@@ -53,7 +57,7 @@ unsigned int get_chunksize(struct block_device *bdev, struct bio *bio)
 	chunksize = min(ret, chunksize);
 	WARN_ON(!chunksize);
 	/* chunksize should be aligned with sectors */
-	WARN_ON(chunksize & ((1 << 9) - 1));
+	WARN_ON(chunksize & ((1 << SECTOR_SHIFT) - 1));
 
 	ret = max_t(int, chunksize, bio_iovec(bio).bv_len);
 
@@ -78,10 +82,18 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 		return -EPERM;
 
 	bio_reset(bio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+	bio_set_dev(bio, bdev);
+#else
 	bio->bi_bdev = bdev;
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+	bio->bi_opf = rw;
+#else
 	bio->bi_rw = rw;
+#endif
 	bio->bi_vcnt = BLKSIZE >> PAGE_SHIFT;
-	bio->bi_iter.bi_sector = binfo->offset >> 9;
+	bio->bi_iter.bi_sector = binfo->offset >> SECTOR_SHIFT;
 	bio->bi_iter.bi_size = BLKSIZE;
 	bio->bi_iter.bi_idx = 0;
 	bio->bi_iter.bi_bvec_done = 0;
@@ -95,22 +107,29 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 		if (1 == atomic_read(&bio->__bi_remaining) &&
 		    cur_chunk == BLKSIZE) {
 			set_debug_info(dev, BIO);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+			res = submit_bio_wait(bio);
+#else
 			res = submit_bio_wait(rw, bio);
+#endif
 			clear_debug_info(dev, BIO);
 			return res;
 		}
 
 		start = 0;
-		split =
-		    bio_next_split(bio, cur_chunk >> 9, GFP_NOIO, fs_bio_set);
+		split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, fs_bio_set);
 		if (split == bio) {
 			set_debug_info(dev, BIO);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+			res = submit_bio_wait(bio);
+#else
 			res = submit_bio_wait(rw, bio);
+#endif
 			clear_debug_info(dev, BIO);
 			return res;
 		} else {
 			bio_chain(split, bio);
-			start = (binfo->offset + done) >> 9;
+			start = (binfo->offset + done) >> SECTOR_SHIFT;
 			tier_submit_bio(dev, binfo->device - 1, split, start);
 		}
 
@@ -146,7 +165,7 @@ int tier_moving_block(struct tier_device *dev, struct blockinfo *olddevice,
 static inline void increase_iostats(struct bio_task *bt)
 {
 	struct tier_device *dev = bt->dev;
-	int rw = bio_rw(bt->parent_bio);
+	int rw = bio_data_dir(bt->parent_bio);
 
 	if (rw) {
 		if (bt->iotype == RANDOM)
@@ -227,7 +246,7 @@ static int binfo_sanity(struct tier_device *dev, struct blockinfo *binfo)
 		return 0;
 	}
 
-	if (binfo->offset > backdev->devicesize) {
+	if (binfo->offset == 0 || binfo->offset > backdev->devicesize) {
 		pr_info("Metadata corruption detected : device %u, offset "
 			"%llu, devsize %llu\n",
 			binfo->device, binfo->offset, backdev->devicesize);
@@ -260,28 +279,16 @@ struct blockinfo *get_blockinfo(struct tier_device *dev, u64 blocknr,
 			binfo = NULL;
 			goto err_ret;
 		}
-		backdev = dev->backdev[binfo->device - 1];
 
-		/* update accesstime and hitcount */
-		if (updatemeta > 0) {
-			if (updatemeta == TIERREAD) {
-				if (binfo->readcount < MAX_STAT_COUNT) {
-					binfo->readcount++;
-					spin_lock(&backdev->magic_lock);
-					backdev->devmagic->total_reads++;
-					spin_unlock(&backdev->magic_lock);
-				}
-			} else {
-				if (binfo->writecount < MAX_STAT_COUNT) {
-					binfo->writecount++;
-					spin_lock(&backdev->magic_lock);
-					backdev->devmagic->total_writes++;
-					spin_unlock(&backdev->magic_lock);
-				}
-			}
-
-			binfo->lastused = get_seconds();
+		if (updatemeta) {
+			atomic64_inc(&dev->backdev[binfo->device - 1]->devmagic->total_hits);
+			atomic64_inc(&binfo->total_hits);
+			atomic64_inc(&dev->total_hits);
+			atomic64_set(&binfo->hits_ts, atomic64_read(&dev->total_hits));
 		}
+	} else if (updatemeta) {
+		atomic64_set(&binfo->hits_ts, atomic64_read(&dev->total_hits));
+		atomic64_inc(&dev->total_hits);
 	}
 
 err_ret:
@@ -297,9 +304,7 @@ static int allocate_block(struct tier_device *dev, u64 blocknr,
 
 	/* Sequential writes will go to SAS or SATA */
 	if (bt->iotype == SEQUENTIAL && dev->attached_devices > 1) {
-		spin_lock(&backdev->magic_lock);
-		device = backdev->devmagic->dtapolicy.sequential_landing;
-		spin_unlock(&backdev->magic_lock);
+		device = atomic_read(&backdev->devmagic->dtapolicy.sequential_landing);
 	}
 
 	while (1) {
@@ -349,10 +354,10 @@ void tier_discard(struct tier_device *dev, u64 offset, unsigned int size)
 		return;
 
 	for (blocknr = start; blocknr < lastblocknr; blocknr++) {
-		mutex_lock(dev->block_lock + blocknr);
+		down_write(dev->block_lock + blocknr);
 		binfo = get_blockinfo(dev, blocknr, 0);
 		if (dev->inerror) {
-			mutex_unlock(dev->block_lock + blocknr);
+			up_write(dev->block_lock + blocknr);
 			break;
 		}
 		if (binfo->device != 0) {
@@ -360,12 +365,11 @@ void tier_discard(struct tier_device *dev, u64 offset, unsigned int size)
 				 "size %u\n",
 				 blocknr, offset, size);
 			clear_dev_list(dev, binfo);
-			reset_counters_on_migration(dev, binfo);
 			discard_on_real_device(dev, binfo);
 			memset(binfo, 0, sizeof(struct blockinfo));
 			write_blocklist(dev, blocknr, binfo, WD);
 		}
-		mutex_unlock(dev->block_lock + blocknr);
+		up_write(dev->block_lock + blocknr);
 
 		/* in case it's a huge discard */
 		cond_resched();
@@ -394,18 +398,30 @@ static void tier_meta_work(struct work_struct *work)
 		/* send this zero size bio to every backing device*/
 		set_debug_info(dev, PRESYNC);
 		for (i = 0; i < dev->attached_devices; i++) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+			bio_init(bio, NULL, 0);
+#else
 			bio_init(bio);
+#endif
 			__bio_clone_fast(bio, parent_bio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
+			bio_set_dev(bio, dev->backdev[i]->bdev);
+#else
 			bio->bi_bdev = dev->backdev[i]->bdev;
+#endif
 			/* no need to set bi_end_io and bi_private */
-			ret |= submit_bio_wait(bio->bi_rw, bio);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+			ret |= submit_bio_wait(bio);
+#else
+			ret |= submit_bio_wait(bio_data_dir(bio), bio);
+#endif
 		}
 		clear_debug_info(dev, PRESYNC);
 	}
 
 	if (bm->discard) {
 		set_debug_info(dev, DISCARD);
-		tier_discard(dev, parent_bio->bi_iter.bi_sector << 9,
+		tier_discard(dev, parent_bio->bi_iter.bi_sector << SECTOR_SHIFT,
 			     parent_bio->bi_iter.bi_size);
 		clear_debug_info(dev, DISCARD);
 	}
@@ -461,7 +477,11 @@ static inline void tier_dev_nodata(struct tier_device *dev,
 	memset(bm, 0, sizeof(*bm));
 
 	bm->dev = dev;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+	bm->flush = (parent_bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) != 0;
+#else
 	bm->flush = (parent_bio->bi_rw & (REQ_FLUSH | REQ_FUA)) != 0;
+#endif
 	bm->parent_bio = parent_bio;
 
 	tier_submit_and_wait_meta(bm);
@@ -517,17 +537,23 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 	u64 end_blk, cur_blk = 0, offset;
 	struct blockinfo *binfo;
 	unsigned int offset_in_blk, size_in_blk;
-	int rw = bio_rw(bt->parent_bio);
+	int rw = bio_data_dir(bt->parent_bio);
 	unsigned int done = 0;
 	unsigned int cur_chunk = 0;
 	sector_t start = 0;
 	unsigned int device;
 	struct bio *split;
 
-	end_blk = ((bio_end_sector(bio) - 1) << 9) >> BLK_SHIFT;
+	end_blk = ((bio_end_sector(bio) - 1) << SECTOR_SHIFT) >> BLK_SHIFT;
+
+	/* bounds check */
+	if (end_blk >= dev->size >> BLK_SHIFT) {
+		bio_endio(bt->parent_bio);
+		goto bio_done;
+	}
 
 	while (cur_blk <= end_blk) {
-		offset = bio->bi_iter.bi_sector << 9;
+		offset = bio->bi_iter.bi_sector << SECTOR_SHIFT;
 		cur_blk = offset >> BLK_SHIFT;
 		offset_in_blk = offset - (cur_blk << BLK_SHIFT);
 		size_in_blk = (cur_blk == end_blk) ? bio->bi_iter.bi_size
@@ -536,50 +562,55 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 		determine_iotype(bt, cur_blk);
 		increase_iostats(bt);
 
-		mutex_lock(dev->block_lock + cur_blk);
-
-		if (rw)
+		if (rw) {
+			down_write(dev->block_lock + cur_blk);
 			binfo = get_blockinfo(dev, cur_blk, TIERWRITE);
-		else
+
+			/* write unallocated space, allocate a new block */
+			if (binfo->device == 0) {
+				tier_dev_allocate(dev, cur_blk, binfo, bt);
+
+				if (0 == binfo->device) {
+					/*
+					 * couldn't allocate, error.
+					 * need more error handling here.
+					 */
+					bio_endio(bt->parent_bio);
+					up_write(dev->block_lock + cur_blk);
+					goto bio_done;
+				}
+			}
+		} else {
+			down_read(dev->block_lock + cur_blk);
 			binfo = get_blockinfo(dev, cur_blk, TIERREAD);
 
-		/* read unallocated block, return data zero */
-		if (unlikely(!rw && 0 == binfo->device)) {
+			/* read unallocated block, return data zero */
+			if (unlikely(binfo->device == 0)) {
+				up_read(dev->block_lock + cur_blk);
 
-			mutex_unlock(dev->block_lock + cur_blk);
+				bio_fill_zero(bio, size_in_blk);
 
-			bio_fill_zero(bio, size_in_blk);
+				bio_advance(bio, size_in_blk);
 
-			bio_advance(bio, size_in_blk);
-
-			/* total splits is 0 and it's now last blk of bio.*/
-			if (1 == atomic_read(&bio->__bi_remaining) &&
-			    cur_blk == end_blk) {
-				bio_endio(bt->parent_bio);
-				goto bio_done;
-			}
-
-			/* total splits > 0 and it's now last blk of bio */
-			if (atomic_read(&bio->__bi_remaining) > 1 &&
-			    cur_blk == end_blk) {
-				atomic_dec(&bio->__bi_remaining);
-				goto bio_submitted_lastbio;
-			}
-
-			continue;
-		}
-
-		/* write unallocated space, allocate a new block */
-		if (rw && 0 == binfo->device) {
-			tier_dev_allocate(dev, cur_blk, binfo, bt);
-
-			if (0 == binfo->device) {
 				/*
-				 * couldn't allocate, error.
-				 * need more error handling here.
+				 * total splits is 0 and it's now last blk
+				 * of bio.
 				 */
-				bio_endio(bt->parent_bio);
-				goto bio_done;
+				if (1 == atomic_read(&bio->__bi_remaining) &&
+				    cur_blk == end_blk) {
+					bio_endio(bt->parent_bio);
+					goto bio_done;
+				}
+				/*
+				 * total splits > 0 and it's now last blk
+				 * of bio
+				 */
+				if (atomic_read(&bio->__bi_remaining) > 1 &&
+				    cur_blk == end_blk) {
+					atomic_dec(&bio->__bi_remaining);
+					goto bio_submitted_lastbio;
+				}
+				continue;
 			}
 		}
 
@@ -598,25 +629,30 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 			/* if no splits, and it's now last blk of bio */
 			if (1 == atomic_read(&bio->__bi_remaining) &&
 			    cur_blk == end_blk && cur_chunk == size_in_blk) {
-				start = (binfo->offset + offset_in_blk) >> 9;
-				mutex_unlock(dev->block_lock + cur_blk);
+				start = (binfo->offset + offset_in_blk) >> SECTOR_SHIFT;
+				if (rw)
+				    up_write(dev->block_lock + cur_blk);
+				else
+				    up_read(dev->block_lock + cur_blk);
+
 				tier_submit_bio(dev, device, bio, start);
 				goto bio_submitted_lastbio;
 			}
 
-			split = bio_next_split(bio, cur_chunk >> 9, GFP_NOIO,
-					       fs_bio_set);
+			split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, fs_bio_set);
 			if (split == bio) {
 				BUG_ON(cur_blk != end_blk);
-				start =
-				    (binfo->offset + offset_in_blk + done) >> 9;
-				mutex_unlock(dev->block_lock + cur_blk);
+				start = (binfo->offset + offset_in_blk + done) >> SECTOR_SHIFT;
+				if (rw)
+				    up_write(dev->block_lock + cur_blk);
+				else
+				    up_read(dev->block_lock + cur_blk);
+
 				tier_submit_bio(dev, device, bio, start);
 				goto bio_submitted_lastbio;
 			} else {
 				bio_chain(split, bio);
-				start =
-				    (binfo->offset + offset_in_blk + done) >> 9;
+				start = (binfo->offset + offset_in_blk + done) >> SECTOR_SHIFT;
 				tier_submit_bio(dev, device, split, start);
 			}
 
@@ -624,7 +660,10 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 		} while (done != size_in_blk);
 
 		/* splitting in current block is done, go to next block.*/
-		mutex_unlock(dev->block_lock + cur_blk);
+		if (rw)
+		    up_write(dev->block_lock + cur_blk);
+		else
+		    up_read(dev->block_lock + cur_blk);
 	}
 
 	return;
@@ -651,7 +690,11 @@ static inline struct bio_task *task_alloc(struct tier_device *dev,
 	bt->iotype = RANDOM;
 
 	bio = &bt->bio;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+	bio_init(bio, NULL, 0);
+#else
 	bio_init(bio);
+#endif
 	__bio_clone_fast(bio, parent_bio);
 	bio->bi_end_io = request_endio;
 	bio->bi_private = bt;
@@ -664,15 +707,10 @@ blk_qc_t tier_make_request(struct request_queue *q, struct bio *parent_bio)
 	int cpu;
 	struct tier_device *dev = q->queuedata;
 	struct bio_task *bt;
-	int rw = bio_rw(parent_bio);
+	int rw = bio_data_dir(parent_bio);
 
 	atomic_set(&dev->wqlock, NORMAL_IO);
 	down_read(&dev->qlock);
-
-	if (rw == READA)
-		rw = READ;
-
-	BUG_ON(!dev || (rw != READ && rw != WRITE));
 
 	/* if deregister already happens, or very bad error happens */
 	if (unlikely(!dev->active || dev->inerror))
@@ -690,7 +728,11 @@ blk_qc_t tier_make_request(struct request_queue *q, struct bio *parent_bio)
 	if (unlikely(!parent_bio->bi_iter.bi_size)) {
 		tier_dev_nodata(dev, parent_bio);
 	} else {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+		if (bio_op(parent_bio) == REQ_OP_DISCARD) {
+#else
 		if (rw && (parent_bio->bi_rw & REQ_DISCARD)) {
+#endif
 			tier_dev_discard(dev, parent_bio);
 			goto end_return;
 		}
@@ -705,7 +747,7 @@ blk_qc_t tier_make_request(struct request_queue *q, struct bio *parent_bio)
 out:
 	bio_io_error(parent_bio);
 end_return:
-	atomic_set(&dev->wqlock, 0);
+	atomic_set(&dev->wqlock, NO_IO);
 	up_read(&dev->qlock);
 	return BLK_QC_T_NONE;
 }
