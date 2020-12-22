@@ -212,14 +212,14 @@ static ssize_t tier_attr_discard_store(struct tier_device *dev, const char *buf,
 		if (dev->discard) {
 			dev->discard = 0;
 			pr_info("discard is disabled\n");
-			queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD,
+			blk_queue_flag_clear(QUEUE_FLAG_DISCARD,
 						  dev->rqueue);
 		}
 	} else {
 		if (!dev->discard) {
 			dev->discard = 1;
 			pr_info("discard is enabled\n");
-			queue_flag_set_unlocked(QUEUE_FLAG_DISCARD,
+			blk_queue_flag_set(QUEUE_FLAG_DISCARD,
 						dev->rqueue);
 		}
 	}

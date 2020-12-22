@@ -117,7 +117,7 @@ static int tier_moving_io(struct tier_device *dev, struct blockinfo *binfo,
 		}
 
 		start = 0;
-		split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, fs_bio_set);
+		split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, &fs_bio_set);
 		if (split == bio) {
 			set_debug_info(dev, BIO);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
@@ -639,7 +639,7 @@ static void tiered_dev_access(struct tier_device *dev, struct bio_task *bt)
 				goto bio_submitted_lastbio;
 			}
 
-			split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, fs_bio_set);
+			split = bio_next_split(bio, cur_chunk >> SECTOR_SHIFT, GFP_NOIO, &fs_bio_set);
 			if (split == bio) {
 				BUG_ON(cur_blk != end_blk);
 				start = (binfo->offset + offset_in_blk + done) >> SECTOR_SHIFT;
@@ -717,8 +717,8 @@ blk_qc_t tier_make_request(struct request_queue *q, struct bio *parent_bio)
 		goto out;
 
 	cpu = part_stat_lock();
-	part_stat_inc(cpu, &dev->gd->part0, ios[rw]);
-	part_stat_add(cpu, &dev->gd->part0, sectors[rw],
+	part_stat_inc(&dev->gd->part0, ios[rw]);
+	part_stat_add(&dev->gd->part0, sectors[rw],
 		      bio_sectors(parent_bio));
 	part_stat_unlock();
 
